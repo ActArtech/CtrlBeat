@@ -1,78 +1,110 @@
 <div align="center">
 
-<img src="assets/concat_logo_dark_512.png" alt="Concat" width="140" />
+<img src="brandkit/app/icon-128.png" alt="CtrlBeat" width="96" />
 
-# Concat
+# CtrlBeat
 
-**The free, open-source CapCut replacement.**
+**Beat-synced video editing.** Local. No watermark. No account.
 
 <p align="center">
-  <a href="https://github.com/jub0t/Concat/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/jub0t/Concat/build.yml?style=flat&logo=githubactions&logoColor=F8F8F8&label=Build&labelColor=000000&color=161616" alt="Build Status" /></a>
-  <a href="https://github.com/jub0t/Concat/releases/latest"><img src="https://img.shields.io/badge/Download-macOS%20%7C%20Windows%20%7C%20Linux-161616?style=flat&logo=desktop-download&logoColor=F8F8F8&labelColor=000000" alt="Download Concat" /></a>
-  <a href="https://github.com/jub0t/Concat/releases"><img src="https://img.shields.io/badge/Version-0.2.0-161616?style=flat&logo=semver&logoColor=F8F8F8&labelColor=000000" alt="Concat Version 0.2.0" /></a>
-  <a href="https://discord.gg/DVuPfpXfqP"><img src="https://img.shields.io/badge/Discord-Join%20the%20server-161616?style=flat&logo=discord&logoColor=F8F8F8&labelColor=000000" alt="Join Concat Discord" /></a>
+  <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11-161616?style=flat&labelColor=000000" alt="Windows" />
+  <img src="https://img.shields.io/badge/Version-0.3.1-E62E31?style=flat&labelColor=000000" alt="Version 0.3.1" />
+  <img src="https://img.shields.io/badge/License-MPL--2.0-161616?style=flat&labelColor=000000" alt="MPL-2.0" />
 </p>
 
-<img src="assets/preview-dark.png" alt="Concat editor" width="100%" />
+<img src="brandkit/github/social-og-1280x640.png" alt="CtrlBeat" width="100%" />
 
 </div>
 
 ---
 
-Concat is everything you use CapCut for — without the watermarks, paywalls,
-or subscriptions. A native Rust engine does the heavy lifting, a clean React
-interface does the editing, and it all runs on your machine: install it and
-start cutting, no account, no extra downloads, no setup.
+CtrlBeat is a desktop video editor built for **music-driven cuts**: detect beats,
+place images and videos on the grid, add visualizer / ASCII overlays, bake them
+into the timeline, and export locally.
 
-> **This tree ships as [CtrlBeat](CTRLBEAT.md)** - a named product on top of
-> Concat, with beat placement, visualizer, ASCII overlays, and a Windows
-> installer under `releases/`. Brand assets: [brandkit/](brandkit/).
-> Credits: [ATTRIBUTION.md](ATTRIBUTION.md). Engineering changelog:
-> [FORK_NOTES.md](FORK_NOTES.md).
+It is a **named product fork** of [Concat / WolfCut](https://github.com/jub0t/Concat).
+It is **not** an official Concat release. See [ATTRIBUTION.md](ATTRIBUTION.md).
 
 ## Highlights
 
-- Free and local Text-to-Speech features.
-- 🎬 Multi-track editing, with several timelines per project when one isn't enough
-- ✂️ The cutting toolkit you'd expect: split, trim, merge, transitions, speed control
-- 💬 Auto-captions that run entirely on your machine — your audio never leaves it
-- 🎙️ Voice filters for cleaning up or playing with your sound
-- 📝 Titles and styled text
-- 📦 Templates — build an edit once, reuse it for the next video
-- 🚫 No watermarks, no account, nothing behind a paywall
-- 🖥️ Works the same on macOS, Windows and Linux
+**CtrlBeat layer**
 
-## Get started
+- Beat detection with timeline marks (Balanced / Bass / Piano / Dense)
+- Place images **and** videos on beats (loop, beats-per-clip, gap-only duration)
+- Music visualizer presets (particles, radial, kaleidoscope, Lissajous, orbit)
+- ASCII / code-symbol overlays (13 glyph sets) with live preview
+- Bake overlays to a top track so export includes them
+- Freeze frame, duplicate clips, fit/match sizing, video source-start window
+- Beats tools live in the **Beats** panel (not dumped in File)
 
-Currently in Alpha (pre-release), Download from [Releases](https://github.com/jub0t/Concat/releases), Supports:
-- Windows (tested)
-- MacOs (tested) - unsigned binaries, use `xattr -dr com.apple.quarantine /Applications/Concat.app`
-- Linux
+**From the Concat engine**
 
-### Nix (Linux)
+- Multi-track timeline, effects, filters, titles, templates
+- On-device captions and TTS hooks
+- Local FFmpeg export, no cloud required for core editing
 
-The repository is a flake. `nix run github:jub0t/Concat` starts the editor
-with ffmpeg and whisper wired in; `nix develop` opens a shell with everything
-`npm run app` needs.
+## Install (Windows)
 
-## Contribution
+Share / run the NSIS installer (built locally; not always on GitHub Releases):
 
-> [!IMPORTANT]
-> The best way to contribute is to grab a build from the [Release](https://github.com/jub0t/Concat/releases) page and test the application to see where it breaks or how it can be improved.
+```text
+releases/CtrlBeat_0.3.1_x64-setup.exe
+```
 
-To learn more about contributing to this project please refer to [this Discussion announcement](https://github.com/jub0t/Concat/discussions/3).
+1. Double-click the setup.exe  
+2. If SmartScreen appears: **More info** → **Run anyway** (unsigned build)  
+3. Open **CtrlBeat** from the Start menu  
 
-## Roadmap (or ideas)
+Projects default to `Desktop/CtrlBeat`.
 
-🌟 = important or really desired.
+## Docs in this repo
 
-- [ ] Templates: Improve templates, create centralized registry of templates contributed by users (kinda like npm).
-- [ ] Hardware analysis: for device-tier detection, checking how good or potato someone's device is.
-- [ ] Effects: A scaleable way to embed or add hundreds of different Transition styles, Effects, etc to the Library.
-- [ ] Noise Cancelation/Removal.
-- [ ] Object/Face Tracking: Proposed (can do better): MOSSE/KCF/optical flow.
-- [ ] Auto Human Face Detection & Blurring features: YuNet + tracker, or look for better alternative tech.
-- [ ] Caption text highlighting: Achievable with Whisper.cpp for timestamps.
-- [ ] Profanity detection from Audio: Whisper + dictionary.
-- [ ] Audio Silence removal feature.
-- [ ] Auto Reframe: YuNet/person detector + tracker.
+| Doc | What it is |
+|-----|------------|
+| [CTRLBEAT.md](CTRLBEAT.md) | Product identity and quick start |
+| [ATTRIBUTION.md](ATTRIBUTION.md) | Concat / WolfCut credit and license notes |
+| [FORK_NOTES.md](FORK_NOTES.md) | Engineering changelog for this fork |
+| [brandkit/](brandkit/) | Logo masters, icons, GitHub / OG assets |
+| [PR_DRAFTS.md](PR_DRAFTS.md) | Draft upstream PRs (freeze / duplicate / fit) |
+
+## Develop
+
+Prerequisites: Node.js, Rust, Visual Studio 2022 Build Tools + Windows SDK.
+
+```text
+cd desktop
+npm install
+npm run app
+```
+
+Release installer (from a VS Developer / `vcvars64` shell):
+
+```text
+cd desktop
+npx tauri build
+```
+
+Run scripts from `desktop/` (repo root has no `app` script).
+
+## Brand
+
+Source of truth: `brandkit/master/*.svg`. Regenerate sized assets:
+
+```text
+cd brandkit/tools
+npm install
+npm run render
+```
+
+Then refresh Tauri icons from `brandkit/app/icon-512.png` (see `brandkit/README.md`).
+
+## Mobile
+
+CtrlBeat is **Windows desktop** today. For phones, use CapCut, kneecap, or LibreCuts.
+
+## License
+
+Covered sources in this tree: see [LICENSE](LICENSE) (MPL-2.0 as shipped here)
+and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Upstream Concat may use
+additional terms on their own releases. Keep Concat / WolfCut credit when you
+redistribute.
