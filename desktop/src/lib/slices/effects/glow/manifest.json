@@ -1,0 +1,7 @@
+{
+  "id": "glow",
+  "kind": "effect",
+  "category": "stylize",
+  "i18nKey": "effects.glow",
+  "swatch": "radial-gradient(circle at 50% 40%, #fff9db 0%, #ffe066 45%, #e8590c 100%)"
+}

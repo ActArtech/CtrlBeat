@@ -1,0 +1,7 @@
+{
+  "id": "cool",
+  "kind": "effect",
+  "category": "color",
+  "i18nKey": "effects.cool",
+  "swatch": "linear-gradient(135deg, #99e9f2 0%, #22b8cf 55%, #0b7285 100%)"
+}

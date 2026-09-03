@@ -1,0 +1,7 @@
+{
+  "id": "vignette",
+  "kind": "effect",
+  "category": "stylize",
+  "i18nKey": "effects.vignette",
+  "swatch": "radial-gradient(circle at 50% 50%, #ced4da 0%, #495057 60%, #16191c 100%)"
+}

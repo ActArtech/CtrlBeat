@@ -207,6 +207,10 @@ fn fx_shake(p: &Params, _index: usize) -> String {
 
 /// Every video effect, in the catalogue's order. Ids are forever: they are
 /// written into project files.
+///
+/// TS catalogue lives as feature slices under
+/// `desktop/src/lib/slices/effects/<id>/`. Until Phase 2 codegen, keep this
+/// table in lockstep with those packages (see `desktop/src/lib/slices/README.md`).
 static EFFECTS: &[Entry] = &[
     Entry { id: "black-white", params: &[], chain: fx_black_white },
     Entry { id: "sepia", params: &[], chain: fx_sepia },

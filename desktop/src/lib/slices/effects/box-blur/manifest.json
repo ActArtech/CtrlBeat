@@ -1,0 +1,7 @@
+{
+  "id": "box-blur",
+  "kind": "effect",
+  "category": "blur",
+  "i18nKey": "effects.box-blur",
+  "swatch": "linear-gradient(135deg, #a5d8ff 0%, #4dabf7 55%, #1971c2 100%)"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "warm",
+  "kind": "effect",
+  "category": "color",
+  "i18nKey": "effects.warm",
+  "swatch": "linear-gradient(135deg, #ffd8a8 0%, #ff922b 55%, #d9480f 100%)"
+}

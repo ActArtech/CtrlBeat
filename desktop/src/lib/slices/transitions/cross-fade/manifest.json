@@ -1,0 +1,8 @@
+{
+  "id": "cross-fade",
+  "kind": "transition",
+  "category": "basic",
+  "i18nKey": "transitions.cross-fade",
+  "implemented": true,
+  "defaultDuration": 1
+}

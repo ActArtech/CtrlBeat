@@ -29,6 +29,7 @@ Do **not** hand people the full source tree or ask them to `git clone` unless th
 
 | Area | What you get |
 |------|----------------|
+| **Effects slices** | Library effects/transitions as discoverable packages under `desktop/src/lib/slices/` |
 | **Beats panel** | Analyze music, mark beats on the timeline, place media on beats |
 | **Beat slideshow** | Images *and* videos on the beat grid, loop until song end, beats-per-clip |
 | **Music visualizer** | Live + bakeable particle / radial / kaleidoscope / Lissajous / orbit overlays |

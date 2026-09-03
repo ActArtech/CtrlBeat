@@ -1,0 +1,7 @@
+{
+  "id": "film-grain",
+  "kind": "effect",
+  "category": "stylize",
+  "i18nKey": "effects.film-grain",
+  "swatch": "linear-gradient(135deg, #dee2e6 0%, #adb5bd 50%, #495057 100%)"
+}
