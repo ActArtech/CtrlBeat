@@ -34,7 +34,8 @@ links onnxruntime (MIT), piper-phonemize (MIT) and espeak-ng
 (**GPL-3.0-or-later**, https://github.com/espeak-ng/espeak-ng) for
 grapheme-to-phoneme conversion. Because espeak-ng is compiled into the app
 binary, distributed builds must comply with the GPL-3.0 for that combined
-work; MPL-2.0 sources remain MPL-2.0.
+work. CtrlBeat's combined application is AGPL-3.0-or-later (see LICENSE and
+NOTICE); AGPL and GPL-3.0 may be combined under their section 13 terms.
 
 Kokoro voice model bundles (Apache-2.0,
 https://huggingface.co/hexgrad/Kokoro-82M) are downloaded on demand from the
