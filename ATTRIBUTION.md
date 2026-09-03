@@ -21,29 +21,29 @@ symbol overlays, bake-to-export path, and related UX are CtrlBeat additions.
 Former interim name **BeatCut** referred to the same fork before the CtrlBeat
 rename; preference keys migrate automatically.
 
-## License (Path 1 - pre-AGPL snapshot)
+## License (Path 2 - AGPL-3.0-or-later)
 
-See `LICENSE` (MPL-2.0), `NOTICE` (path map), and `THIRD_PARTY_NOTICES.md`.
+See `LICENSE` (GNU Affero General Public License v3.0), path map in `NOTICE`,
+and `THIRD_PARTY_NOTICES.md`.
 
 **Facts for this tree:**
 
 | Item | Value |
 |------|--------|
-| Repo license as shipped | **MPL-2.0** |
+| Repo / combined product license | **AGPL-3.0-or-later** |
 | Upstream AGPL switch | Concat commit `c30b245` / tag `v0.2.0-alpha.19` (2 Sep 2026) |
-| This fork's merge-base with jub0t/Concat `main` | `8938ec34fbc28bd9790dee3a676dabc529105aa0` (31 Aug 2026, still MPL) |
-| MIT for the whole repo | **Not available** (would mislabel inherited copyright) |
+| MIT for the whole repo | **Not available** |
+| Concat plugin exception | **Does not apply** (full-app fork, not an Independent Module) |
 
-A license change upstream is not retroactive. Code received under MPL-2.0
-stays usable under MPL-2.0. If this repo later merges Concat from
-`v0.2.0-alpha.19` onward, the combined work must satisfy **AGPL-3.0-or-later**.
-
-Do not merge those AGPL commits into CtrlBeat without deliberately switching
-the product to Path 2 (AGPL). Concat's plugin exception does **not** apply to
-this full-app fork.
+Path 2 means CtrlBeat may track Concat and carries AGPL's network clause: if
+you modify CtrlBeat and provide it to users over a network, you must offer
+them the corresponding source under AGPL.
 
 End users who only edit videos locally have no extra obligation. Obligations
 attach to redistribution, embedding, and hosting.
+
+For a closed-source desktop or SaaS product built on this code, contact
+Concat for a commercial license. Do not ship under MIT.
 
 ## Third-party ideas adapted in CtrlBeat
 

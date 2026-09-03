@@ -8,45 +8,41 @@ Product name: CtrlBeat (not Concat, not WolfCut).
 See ATTRIBUTION.md for trademark and credit rules.
 
 -------------------------------------------------------------------------------
-1. Licensing path for this fork (Path 1 - pre-AGPL snapshot)
+1. Licensing path for this fork (Path 2 - AGPL-3.0-or-later)
 -------------------------------------------------------------------------------
 
 CtrlBeat is a product fork of Concat / WolfCut (https://github.com/jub0t/Concat).
 
-Upstream Concat relicensed from MPL-2.0 to AGPL-3.0-or-later in commit
-c30b245 ("Relicense from MPL-2.0 to AGPL-3.0-or-later"), tagged
-v0.2.0-alpha.19 (2 Sep 2026). That change is not retroactive.
+The combined CtrlBeat application (inherited engine and desktop shell plus
+CtrlBeat product layer) is distributed under the GNU Affero General Public
+License v3.0 or later. See LICENSE.
 
-This repository's merge-base with jub0t/Concat main is:
+Upstream Concat relicensed to AGPL-3.0-or-later in commit c30b245
+(v0.2.0-alpha.19, 2 Sep 2026). Path 2 aligns CtrlBeat with that choice so
+this product may track Concat and carries the AGPL network clause
+(section 13): if you modify CtrlBeat and let others use it over a network,
+you must offer them the corresponding source.
 
-  8938ec34fbc28bd9790dee3a676dabc529105aa0
-  2026-08-31 - Rebuild the Text panel on the wc-ui-rnd inspector
-
-That commit is before the AGPL relicense. The LICENSE file in this tree is
-the full MPL-2.0 text. Do not merge Concat commits from v0.2.0-alpha.19
-onward into this tree unless you intentionally move the combined work to
-AGPL-3.0-or-later (Path 2).
-
-Do not set the GitHub license field to MIT for this repository. MIT is not
-available for the inherited Concat / WolfCut engine or desktop shell.
+Historical note: this tree's earlier merge-base with jub0t/Concat main was
+still MPL-era (8938ec3). Path 2 deliberately places the shipped product under
+AGPL-3.0-or-later going forward. Do not label this repository MIT.
 
 -------------------------------------------------------------------------------
 2. Path map
 -------------------------------------------------------------------------------
 
-Inherited Concat / WolfCut (MPL-2.0 as received; copyright jub0t and
-upstream contributors):
+Combined work (AGPL-3.0-or-later as shipped):
 
-  engine/crates/wolfcut-*     Editing engine crates
-  desktop/src-tauri/          Tauri host (except local staging of tools)
-  desktop/src/                Desktop UI shell, except CtrlBeat-original
-                              paths listed below
-  desktop/src/lib/effects.ts  Catalogue API (built on upstream effect model)
-  desktop/src/lib/filters.ts  Audio filter catalogue pattern from upstream
-  LICENSE                     MPL-2.0 for the covered work as shipped
+  engine/crates/wolfcut-*     Editing engine crates (inherited; jub0t et al.)
+  desktop/src-tauri/          Tauri host
+  desktop/src/                Desktop UI including CtrlBeat product layer
+  brandkit/
+  LICENSE                     AGPL-3.0 (or later)
+  NOTICE                      This file
+  CTRLBEAT.md, README.md, ATTRIBUTION.md, FORK_NOTES.md, PR_DRAFTS.md
 
-CtrlBeat-original product layer (still distributed under MPL-2.0 with this
-combined work in Path 1; copyright ActArtech / CtrlBeat authors):
+CtrlBeat-original product layer (same combined AGPL terms; copyright
+ActArtech / CtrlBeat authors), including but not limited to:
 
   desktop/src/lib/brand.ts
   desktop/src/lib/beatDetection.ts
@@ -56,17 +52,13 @@ combined work in Path 1; copyright ActArtech / CtrlBeat authors):
   desktop/src/lib/beatWorkflow.ts
   desktop/src/lib/clipFit.ts
   desktop/src/lib/codevice/
-  desktop/src/lib/slices/          Effect/transition slice registry (Phase 1)
+  desktop/src/lib/slices/
   desktop/src/components/BeatsPanel.tsx
   desktop/src/components/AsciiLiveOverlay.tsx
   desktop/src/hooks/useAsciiOverlay.ts
-  brandkit/
-  CTRLBEAT.md
-  ATTRIBUTION.md
-  NOTICE                           This file
-  PR_DRAFTS.md
 
-Bundled / third-party (see THIRD_PARTY_NOTICES.md):
+Bundled / third-party (see THIRD_PARTY_NOTICES.md; not relicensed by this
+NOTICE):
 
   FFmpeg / ffprobe binaries       GPL builds when shipped as separate programs
   Whisper / transcription tools   As documented in THIRD_PARTY_NOTICES.md
@@ -78,7 +70,9 @@ Bundled / third-party (see THIRD_PARTY_NOTICES.md):
 
 Concat's plugin exception covers Independent Modules that talk through the
 Concat API / IPC / project format without vendoring or modifying Concat
-source. CtrlBeat is a full-app product fork. It is outside that exception.
+source. CtrlBeat is a full-app product fork. That exception does not apply.
+You cannot treat CtrlBeat as a plugin in order to use a more permissive
+license for the whole editor.
 
 -------------------------------------------------------------------------------
 4. End users
@@ -86,4 +80,5 @@ source. CtrlBeat is a full-app product fork. It is outside that exception.
 
 People who only install CtrlBeat and edit videos on their own machine have
 no extra license paperwork. Obligations attach to people who fork,
-redistribute, embed, or host the software.
+redistribute, embed, or host the software (including network use of a
+modified version under AGPL section 13).

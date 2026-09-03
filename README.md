@@ -9,7 +9,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11-161616?style=flat&labelColor=000000" alt="Windows" />
   <img src="https://img.shields.io/badge/Version-0.3.1-E62E31?style=flat&labelColor=000000" alt="Version 0.3.1" />
-  <img src="https://img.shields.io/badge/License-MPL--2.0-161616?style=flat&labelColor=000000" alt="MPL-2.0" />
+  <img src="https://img.shields.io/badge/License-AGPL--3.0--or--later-161616?style=flat&labelColor=000000" alt="AGPL-3.0-or-later" />
 </p>
 
 <img src="brandkit/github/social-og-1280x640.png" alt="CtrlBeat" width="100%" />
@@ -104,16 +104,14 @@ CtrlBeat is **Windows desktop** today. For phones, use CapCut, kneecap, or Libre
 
 ## License
 
-**MPL-2.0** for this tree as shipped. See [LICENSE](LICENSE), path map in
-[NOTICE](NOTICE), credit in [ATTRIBUTION.md](ATTRIBUTION.md), and
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+**AGPL-3.0-or-later** for the combined CtrlBeat product (Path 2). See
+[LICENSE](LICENSE), path map in [NOTICE](NOTICE), credit in
+[ATTRIBUTION.md](ATTRIBUTION.md), and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-**Do not treat this repo as MIT.** CtrlBeat inherits the Concat / WolfCut
-engine and desktop shell. Only the copyright holders can relicense that code.
-Concat moved to AGPL-3.0-or-later at `v0.2.0-alpha.19` (`c30b245`); that change
-is not retroactive. This fork's merge-base with upstream `main` is still
-pre-AGPL (`8938ec3`). Do not merge AGPL-era Concat into this tree without
-intentionally moving CtrlBeat to AGPL.
+**Do not treat this repo as MIT.** CtrlBeat is a full-app fork of Concat /
+WolfCut. Concat's plugin exception does **not** apply. AGPL includes a
+network clause: if you modify CtrlBeat and let others use it over a network,
+you must offer them the corresponding source.
 
 End users editing videos on their own machine have no extra paperwork.
 Obligations apply to forks, redistribution, embedding, and hosting.

@@ -57,12 +57,12 @@ work in progress. For phones, use CapCut, kneecap, or LibreCuts.
 
 ## License
 
-**MPL-2.0** as shipped (`LICENSE`). Path map and upstream cutoff: `NOTICE`.
-Credit: `ATTRIBUTION.md`.
+**AGPL-3.0-or-later** (Path 2). See `LICENSE`, path map in `NOTICE`, credit in
+`ATTRIBUTION.md`.
 
-Pin: do **not** merge Concat from `v0.2.0-alpha.19` / AGPL onward unless you
-deliberately switch this product to AGPL-3.0-or-later. MIT is not available for
-the whole editor fork.
+Concat's plugin exception does **not** apply to this full-app fork. MIT is not
+available for the whole editor. Local end users have no extra paperwork;
+redistributors and network hosts of modified versions must follow AGPL.
 
 ## Dev
 
