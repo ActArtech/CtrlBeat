@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 
+import { openUrl } from "@tauri-apps/plugin-opener";
+
 import {
   cancelModelDownload,
   cancelTtsModelDownload,
@@ -17,6 +19,8 @@ import {
   type TranscriberStatus,
   type TtsStatus,
 } from "../lib/engine";
+import aboutMark from "../assets/brand/about-128.png";
+import { BRAND } from "../lib/brand";
 import { LOCALES, systemLocale, useLocale, type MsgKey } from "../lib/i18n";
 import {
   getTranscriberLanguage,
@@ -619,25 +623,88 @@ function SpeechSettings() {
 
 function AboutSettings() {
   const { t } = useLocale();
-  const [version, setVersion] = useState<string | null>(null);
+  const [engine, setEngine] = useState<string | null>(null);
 
   useEffect(() => {
     engineVersion()
-      .then(setVersion)
-      .catch(() => setVersion(null));
+      .then(setEngine)
+      .catch(() => setEngine(null));
   }, []);
 
+  const openBase = () => {
+    void openUrl(BRAND.basedOn.url).catch(() => undefined);
+  };
+
   return (
-    <div className="flex flex-col gap-1.5">
-      <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-tertiary">
-        WolfCut
-      </h3>
-      <p className="text-xs text-secondary">
-        {t("settings.about.version", {
-          version: version ?? t("settings.about.versionUnknown"),
-        })}
-      </p>
-      <p className="text-[11px] leading-relaxed text-tertiary">{t("settings.about.blurb")}</p>
+    <div className="flex flex-col gap-4">
+      <div>
+        <div className="mb-3 flex items-center gap-3">
+          <img
+            src={aboutMark}
+            alt=""
+            className="h-14 w-14 rounded-2xl ring-1 ring-hairline"
+            draggable={false}
+          />
+          <div>
+            <h3 className="font-display text-base font-semibold tracking-tight text-primary">
+              {BRAND.name}
+            </h3>
+            <p className="mt-0.5 text-[12px] text-secondary">{t("brand.tagline")}</p>
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-secondary">
+          {t("settings.about.version", {
+            version: BRAND.version,
+          })}
+        </p>
+        {engine && (
+          <p className="mt-0.5 text-[11px] text-tertiary">
+            {t("settings.about.engineVersion", { version: engine })}
+          </p>
+        )}
+        <p className="mt-2 text-[11px] leading-relaxed text-tertiary">
+          {t("settings.about.blurb")}
+        </p>
+      </div>
+
+      <section>
+        <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-tertiary">
+          {t("settings.about.highlights")}
+        </h4>
+        <ul className="flex list-disc flex-col gap-1 pl-4 text-[11px] leading-relaxed text-secondary">
+          <li>{t("settings.about.highlightBeats")}</li>
+          <li>{t("settings.about.highlightViz")}</li>
+          <li>{t("settings.about.highlightAscii")}</li>
+          <li>{t("settings.about.highlightBake")}</li>
+          <li>{t("settings.about.highlightEdit")}</li>
+        </ul>
+      </section>
+
+      <section>
+        <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-tertiary">
+          {t("settings.about.credits")}
+        </h4>
+        <p className="text-[11px] leading-relaxed text-secondary">
+          {t("settings.about.basedOn", {
+            name: BRAND.basedOn.name,
+            aka: BRAND.basedOn.alsoKnownAs,
+            author: BRAND.basedOn.author,
+          })}
+        </p>
+        <button
+          type="button"
+          onClick={openBase}
+          className="mt-2 cursor-pointer text-[11px] text-accent underline-offset-2 hover:underline"
+        >
+          {BRAND.basedOn.url.replace(/^https:\/\//, "")}
+        </button>
+        <p className="mt-2 text-[11px] leading-relaxed text-tertiary">
+          {t("settings.about.license", { license: BRAND.license })}
+        </p>
+        <p className="mt-1 text-[11px] leading-relaxed text-tertiary">
+          {t("settings.about.trademarkNote")}
+        </p>
+      </section>
     </div>
   );
 }

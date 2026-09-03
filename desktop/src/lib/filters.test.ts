@@ -17,8 +17,11 @@ const one = (id: string, params: Record<string, number> = {}) =>
   buildChain([{ id, params }]);
 
 /** The definition's sliders, all pushed to one bound. */
-const bound = (id: string, which: "min" | "max"): Record<string, number> =>
-  Object.fromEntries(findFilter(id)!.params.map((param) => [param.key, param[which]]));
+const bound = (id: string, which: "min" | "max"): Record<string, number> => {
+  const filter = findFilter(id);
+  if (!filter) throw new Error(`unknown filter: ${id}`);
+  return Object.fromEntries(filter.params.map((param) => [param.key, param[which]]));
+};
 
 // The Voice category is built on the pitchShift helper: asetrate moves pitch
 // and formants together, atempo puts the duration back. The rates below are

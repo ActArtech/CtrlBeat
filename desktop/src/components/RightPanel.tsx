@@ -11,42 +11,51 @@ import {
 } from "../lib/editor";
 import { useLocale, type MsgKey } from "../lib/i18n";
 import { AdjustPanel } from "./AdjustPanel";
+import { BeatsPanel } from "./BeatsPanel";
 import { EffectsPanel } from "./EffectsPanel";
 import { FiltersPanel } from "./FiltersPanel";
 import { Inspector } from "./Inspector";
 import inspector from "./inspector/inspector.module.css";
 import { Panel } from "./Panel";
 import { TextPanel } from "./TextPanel";
+import type { BeatPresetId } from "../lib/beatPresets";
+import type { SymbolSetId } from "../lib/codevice/symbolSets";
+import type { VisualizerLayoutId, VisualizerPresetId, VizColorModeId } from "../lib/codevice/musicVisualizer";
+import type { AsciiColorModeId, AsciiMotionId } from "../lib/codevice/asciiPalettes";
+import type { AsciiDriveMode, OverlaySurface } from "./AsciiLiveOverlay";
 
-export type RightTab = "details" | "adjust" | "filters" | "effects" | "text";
+export type RightTab = "details" | "beats" | "adjust" | "filters" | "effects" | "text";
 
 /**
  * The tab strip follows the selection.
  *
- * Nothing selected: only Details, showing the project itself - there is
- * nothing to edit, so no editing tabs. A media clip selected: Adjust and
- * Filters, the things that can actually be changed. A title: just Text,
- * because a text clip has no volume, no speed and no audio filters, and
- * offering those tabs would be offering panels that can only say "nothing
- * here".
+ * Beats is always offered: beat detection and ASCII tools are project-level,
+ * not clip-property editors. Details / Adjust / Filters / Effects / Text still
+ * follow what is selected.
  */
 const DETAILS_TABS: { id: RightTab; labelKey: MsgKey }[] = [
   { id: "details", labelKey: "rightPanel.details" },
+  { id: "beats", labelKey: "rightPanel.beats" },
 ];
 
 const CLIP_TABS: { id: RightTab; labelKey: MsgKey }[] = [
   { id: "adjust", labelKey: "rightPanel.adjust" },
   { id: "filters", labelKey: "rightPanel.filters" },
   { id: "effects", labelKey: "rightPanel.effects" },
+  { id: "beats", labelKey: "rightPanel.beats" },
 ];
 
 // A still has picture but no sound, so it gets Effects but not Filters.
 const IMAGE_TABS: { id: RightTab; labelKey: MsgKey }[] = [
   { id: "adjust", labelKey: "rightPanel.adjust" },
   { id: "effects", labelKey: "rightPanel.effects" },
+  { id: "beats", labelKey: "rightPanel.beats" },
 ];
 
-const TEXT_TABS: { id: RightTab; labelKey: MsgKey }[] = [{ id: "text", labelKey: "rightPanel.text" }];
+const TEXT_TABS: { id: RightTab; labelKey: MsgKey }[] = [
+  { id: "text", labelKey: "rightPanel.text" },
+  { id: "beats", labelKey: "rightPanel.beats" },
+];
 
 /**
  * The right-hand panel.
@@ -79,6 +88,7 @@ export const RightPanel = memo(function RightPanel({
   onAddFont,
   onRemoveFont,
   onModifyProject,
+  beats,
 }: {
   tab: RightTab;
   onTab: (tab: RightTab) => void;
@@ -100,6 +110,51 @@ export const RightPanel = memo(function RightPanel({
   onRemoveFont: (family: string) => void;
   /** Opens the project-details editor (name, output frame). */
   onModifyProject: () => void;
+  /** Beat detection + ASCII tools (always available). */
+  beats: {
+    beatCount: number;
+    analyzingBeats: boolean;
+    bakingSymbols: boolean;
+    beatPresetId: BeatPresetId;
+    beatsPerImage: number;
+    loopImagesUntilEnd: boolean;
+    asciiLivePreview: boolean;
+    asciiDriveMode: AsciiDriveMode;
+    overlaySurface: OverlaySurface;
+    visualizerPreset: VisualizerPresetId;
+    visualizerLayout: VisualizerLayoutId;
+    symbolSetId: SymbolSetId;
+    asciiColorMode: AsciiColorModeId;
+    asciiPaletteId: string;
+    asciiMotion: AsciiMotionId;
+    vizColorMode: VizColorModeId;
+    vizCount: number;
+    beatOffsetMs: number;
+    beatBpm: number;
+    canAnalyze: boolean;
+    canPlaceImages: boolean;
+    canPlaceSymbols: boolean;
+    onAnalyze: () => void;
+    onClearBeats: () => void;
+    onPlaceImages: () => void;
+    onPlaceSymbols: () => void;
+    onPlaceVisualizer: () => void;
+    onBeatPreset: (id: BeatPresetId) => void;
+    onBeatsPerImage: (n: number) => void;
+    onLoopImages: (value: boolean) => void;
+    onAsciiLivePreview: (value: boolean) => void;
+    onAsciiDriveMode: (mode: AsciiDriveMode) => void;
+    onOverlaySurface: (surface: OverlaySurface) => void;
+    onVisualizerPreset: (id: VisualizerPresetId) => void;
+    onVisualizerLayout: (id: VisualizerLayoutId) => void;
+    onSymbolSet: (id: SymbolSetId) => void;
+    onAsciiColorMode: (mode: AsciiColorModeId) => void;
+    onAsciiPalette: (id: string) => void;
+    onAsciiMotion: (motion: AsciiMotionId) => void;
+    onVizColorMode: (mode: VizColorModeId) => void;
+    onVizCount: (count: number) => void;
+    onBeatOffset: (ms: number) => void;
+  };
 }) {
   const { t } = useLocale();
   const isText = clip?.kind === "text";
@@ -175,6 +230,7 @@ export const RightPanel = memo(function RightPanel({
       {active === "adjust" && (
         <AdjustPanel
           clip={clip}
+          media={media}
           onChange={onChangeClip}
           onCommit={onCommitClip}
           onSpeedChange={onSpeedChange}
@@ -198,6 +254,7 @@ export const RightPanel = memo(function RightPanel({
           onCommit={onCommitClip}
         />
       )}
+      {active === "beats" && <BeatsPanel {...beats} />}
     </Panel>
   );
 });

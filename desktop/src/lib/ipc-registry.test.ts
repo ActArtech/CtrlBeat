@@ -22,13 +22,14 @@ function read(path: string): string {
 function registeredCommands(): Set<string> {
   const source = read("src-tauri/src/lib.rs");
   const block = source.match(/generate_handler!\[([\s\S]*?)\]/);
-  expect(block, "generate_handler! block in src-tauri/src/lib.rs").toBeTruthy();
-  const names = block![1]
+  if (!block) throw new Error("generate_handler! block in src-tauri/src/lib.rs");
+  const names = block[1]
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0)
     // `editor_api::editor_open` registers as `editor_open`.
-    .map((entry) => entry.split("::").pop()!);
+    .map((entry) => entry.split("::").pop())
+    .filter((name): name is string => name !== undefined);
   return new Set(names);
 }
 

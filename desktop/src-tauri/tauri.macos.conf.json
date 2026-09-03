@@ -3,7 +3,7 @@
   "app": {
     "windows": [
       {
-        "title": "WolfCut",
+        "title": "CtrlBeat",
         "width": 1440,
         "height": 900,
         "minWidth": 1024,

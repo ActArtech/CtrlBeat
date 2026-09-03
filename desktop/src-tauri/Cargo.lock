@@ -5847,7 +5847,7 @@ version = "0.2.0"
 
 [[package]]
 name = "wolfcut-desktop"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "bzip2 0.6.1",
  "cpal",

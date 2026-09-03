@@ -5,6 +5,7 @@ import type {
 } from "react";
 
 import { subscribeAssets, type MediaAssets, type Peaks } from "../lib/assets";
+import { beatIndexNear } from "../lib/beatTimeline";
 import { themeColor, type Theme } from "../lib/theme";
 import {
   activeTimeline,
@@ -28,7 +29,7 @@ const RULER_HEIGHT = 28;
 /** Tall enough that a filmstrip frame and a waveform are both readable. */
 const TRACK_HEIGHT = 64;
 /** Marks the canvas so a drag in flight can find it. See `resolveDrop`. */
-const CANVAS_MARKER = "data-wolfcut-timeline";
+const CANVAS_MARKER = "data-ctrlbeat-timeline";
 const HEADER_WIDTH = 164;
 /** How close to a clip edge the pointer must be to grab it, in pixels. */
 const EDGE_GRAB = 6;
@@ -59,6 +60,7 @@ const COLORS = {
   clipSelected: "#0a84ff",
   clipText: "#ffffff",
   playhead: "#ff453a",
+  beat: "#5ac8fa",
   dropZone: "rgba(10,132,255,0.18)",
 };
 
@@ -74,6 +76,7 @@ function refreshCanvasPalette(): void {
   COLORS.clipSelected = themeColor("accent", COLORS.clipSelected);
   COLORS.clipText = themeColor("on-accent", COLORS.clipText);
   COLORS.playhead = themeColor("playhead", COLORS.playhead);
+  COLORS.beat = themeColor("accent", COLORS.beat);
   COLORS.dropZone = themeColor("accent-soft", COLORS.dropZone);
 
   PALETTE.video.header = themeColor("clip-video", PALETTE.video.header);
@@ -100,6 +103,7 @@ interface MoveOrigin {
 
 type DragState =
   | { kind: "scrub" }
+  | { kind: "beat"; index: number }
   | {
       kind: "marquee";
       /** Canvas-relative, so the band survives the view scrolling under it. */
@@ -133,6 +137,7 @@ export function TimelinePanel({
   secondsPerPixel,
   scrollLeft,
   trackScroll,
+  beatTimes = [],
   assets,
   theme,
   onToolChange,
@@ -145,6 +150,9 @@ export function TimelinePanel({
   onMergeSelected,
   mergeBlockedBecause,
   onDeleteSelected,
+  onMoveBeat,
+  onRemoveBeat,
+  onAddBeat,
   mediaDrag,
   onZoom,
   onScroll,
@@ -175,6 +183,14 @@ export function TimelinePanel({
   scrollLeft: number;
   /** Vertical offset into the track stack, in pixels. */
   trackScroll: number;
+  /** Analyzed beat times in seconds, drawn as marks on the ruler. */
+  beatTimes?: readonly number[];
+  /** Drag a beat mark to a new timeline time. */
+  onMoveBeat?: (index: number, time: number) => void;
+  /** Remove one beat mark (Delete while hovering, or Alt+click). */
+  onRemoveBeat?: (index: number) => void;
+  /** Double-click the ruler (empty) to add a beat. */
+  onAddBeat?: (time: number) => void;
   /** Waveform and filmstrip cache, read live from inside the draw loop. */
   assets: MediaAssets;
   /** Only used to know when to re-read the canvas palette. */
@@ -255,8 +271,38 @@ export function TimelinePanel({
 
   // The draw loop reads everything through this ref, so a prop change never
   // tears down and rebuilds the loop.
-  const view = useRef({ project, timeline, playhead, playing, secondsPerPixel, scrollLeft, trackScroll, frameRate, selected, rows, dropTrack, assets, tool });
-  view.current = { project, timeline, playhead, playing, secondsPerPixel, scrollLeft, trackScroll, frameRate, selected, rows, dropTrack, assets, tool };
+  const view = useRef({
+    project,
+    timeline,
+    playhead,
+    playing,
+    secondsPerPixel,
+    scrollLeft,
+    trackScroll,
+    frameRate,
+    selected,
+    rows,
+    dropTrack,
+    assets,
+    tool,
+    beatTimes,
+  });
+  view.current = {
+    project,
+    timeline,
+    playhead,
+    playing,
+    secondsPerPixel,
+    scrollLeft,
+    trackScroll,
+    frameRate,
+    selected,
+    rows,
+    dropTrack,
+    assets,
+    tool,
+    beatTimes,
+  };
 
   // Repaint only when something could have changed. Every render marks the
   // canvas dirty (props are how state reaches it), pointer moves mark it
@@ -473,6 +519,16 @@ export function TimelinePanel({
 
     context.restore();
 
+    // Beats sit above clips so they stay visible, under the playhead.
+    drawBeatMarks(
+      context,
+      width,
+      height,
+      state.scrollLeft,
+      state.secondsPerPixel,
+      state.beatTimes,
+      state.playhead,
+    );
     drawPlayhead(context, height, toX(state.playhead));
   }, []);
 
@@ -534,8 +590,25 @@ export function TimelinePanel({
     // selection band instead, which is the convention every NLE shares and the
     // only way marquee select and scrubbing can coexist on one surface.
     if (overRuler) {
+      const time = timeAt(event.clientX);
+      const beatHit = beatIndexNear(
+        time,
+        view.current.beatTimes,
+        view.current.secondsPerPixel,
+        8,
+      );
+      if (beatHit >= 0 && (onMoveBeat || onRemoveBeat)) {
+        if (event.altKey && onRemoveBeat) {
+          onRemoveBeat(beatHit);
+          return;
+        }
+        if (onMoveBeat) {
+          drag.current = { kind: "beat", index: beatHit };
+          return;
+        }
+      }
       drag.current = { kind: "scrub" };
-      onScrub(timeAt(event.clientX));
+      onScrub(time);
       return;
     }
 
@@ -625,6 +698,11 @@ export function TimelinePanel({
       return;
     }
 
+    if (state.kind === "beat") {
+      onMoveBeat?.(state.index, Math.max(0, time));
+      return;
+    }
+
     if (state.kind === "marquee") {
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -684,6 +762,18 @@ export function TimelinePanel({
 
     if (!drag.current) {
       edgeSpeed.current = 0;
+      const bounds = canvas.getBoundingClientRect();
+      const overRuler = event.clientY - bounds.top < RULER_HEIGHT;
+      if (overRuler) {
+        const beatHit = beatIndexNear(
+          timeAt(event.clientX),
+          view.current.beatTimes,
+          view.current.secondsPerPixel,
+          8,
+        );
+        canvas.style.cursor = beatHit >= 0 ? "ew-resize" : "text";
+        return;
+      }
       // Cursor feedback: the edges are grabbable, the body is draggable.
       const hit = clipAt(event.clientX, event.clientY);
       canvas.style.cursor =
@@ -1075,8 +1165,38 @@ export function TimelinePanel({
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
           onWheel={onWheel}
+          onDoubleClick={(event) => {
+            const canvas = event.currentTarget;
+            const bounds = canvas.getBoundingClientRect();
+            if (event.clientY - bounds.top >= RULER_HEIGHT) return;
+            const time = timeAt(event.clientX);
+            const hit = beatIndexNear(
+              time,
+              view.current.beatTimes,
+              view.current.secondsPerPixel,
+              8,
+            );
+            if (hit >= 0) {
+              onRemoveBeat?.(hit);
+              return;
+            }
+            onAddBeat?.(time);
+          }}
           onContextMenu={(event) => {
             event.preventDefault();
+            const canvas = event.currentTarget;
+            const bounds = canvas.getBoundingClientRect();
+            if (event.clientY - bounds.top < RULER_HEIGHT) {
+              const time = timeAt(event.clientX);
+              const hit = beatIndexNear(
+                time,
+                view.current.beatTimes,
+                view.current.secondsPerPixel,
+                8,
+              );
+              if (hit >= 0) onRemoveBeat?.(hit);
+              return;
+            }
             const hit = clipAt(event.clientX, event.clientY);
             if (hit) onClipContextMenu(hit.clip.id, event.clientX, event.clientY);
           }}
@@ -1422,6 +1542,51 @@ function drawRuler(
     context.stroke();
     context.fillText(timecode(seconds, frameRate), x + 5, RULER_HEIGHT / 2 - 2);
   }
+}
+
+/**
+ * Beat marks: a faint line through the lanes plus a solid triangle on the
+ * ruler so they stay obvious at any zoom. Marks pulse as the playhead
+ * crosses them so hits read during playback.
+ */
+function drawBeatMarks(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  scrollLeft: number,
+  secondsPerPixel: number,
+  beatTimes: readonly number[] | undefined,
+  playhead: number,
+) {
+  if (!beatTimes || beatTimes.length === 0) return;
+  context.save();
+  for (const time of beatTimes) {
+    if (!Number.isFinite(time)) continue;
+    const x = Math.round((time - scrollLeft) / secondsPerPixel) + 0.5;
+    if (x < -2 || x > width + 2) continue;
+
+    const hit = Math.max(0, 1 - Math.abs(time - playhead) / 0.12);
+
+    context.strokeStyle = COLORS.beat;
+    context.globalAlpha = 0.35 + hit * 0.5;
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(x, RULER_HEIGHT);
+    context.lineTo(x, height);
+    context.stroke();
+
+    context.globalAlpha = 1;
+    context.fillStyle = COLORS.beat;
+    const spread = 4 + hit * 2.5;
+    const rise = 8 + hit * 2;
+    context.beginPath();
+    context.moveTo(x, RULER_HEIGHT - 2);
+    context.lineTo(x - spread, RULER_HEIGHT - 2 - rise);
+    context.lineTo(x + spread, RULER_HEIGHT - 2 - rise);
+    context.closePath();
+    context.fill();
+  }
+  context.restore();
 }
 
 /** Height of the coloured name strip at the top of every clip. */

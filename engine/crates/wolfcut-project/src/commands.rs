@@ -19,6 +19,8 @@ use crate::model::{
 const UNKNOWN_DURATION: f64 = 5.0;
 /// How long a still lasts when first placed. Editorial default, not a fact.
 const DEFAULT_IMAGE_DURATION: f64 = 5.0;
+/// How long a CapCut-style freeze holds by default when the UI omits duration.
+const DEFAULT_FREEZE_DURATION: f64 = 1.0;
 /// How long a title lasts when first placed.
 const DEFAULT_TEXT_DURATION: f64 = 4.0;
 const MIN_CLIP_DURATION: f64 = 1.0 / 60.0;
@@ -55,6 +57,27 @@ pub enum TrackFlag {
     Visible,
     /// [`Track::muted`]: whether the track's audio is silenced.
     Muted,
+}
+
+/// One still (or other bin item) to drop at an explicit start and duration.
+/// Used by beat-synced slideshow placement so the UI can plan on a beat grid
+/// and land the whole run as a single undoable edit.
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "types", derive(ts_rs::TS))]
+#[cfg_attr(feature = "types", ts(export))]
+#[serde(rename_all = "camelCase")]
+pub struct ImagePlacement {
+    /// Bin media to place. Unknown ids are skipped.
+    pub media_id: String,
+    /// Timeline start in seconds, floored at 0.
+    pub start: f64,
+    /// Editorial length in seconds, floored at [`MIN_CLIP_DURATION`].
+    pub duration: f64,
+    /// Optional source in-point for video (and stills, unused). When absent,
+    /// the clip starts at media time 0.
+    #[cfg_attr(feature = "types", ts(optional))]
+    #[serde(default)]
+    pub source_start: Option<f64>,
 }
 
 /// Where one clip is going, in a multi-clip move.
@@ -292,6 +315,47 @@ pub enum Command {
         /// The cut point, in timeline seconds.
         time: f64,
     },
+    /// Deep-copies each named clip onto the same track, placed end-to-end
+    /// after the original (`start + duration`). Mints fresh `c*` ids and
+    /// clears `transition_in` / `detached_from` so the copy is independent.
+    /// Unknown ids are skipped. `created_id` is the last minted clip.
+    DuplicateClips {
+        /// The clips to copy - normally the selection.
+        clip_ids: Vec<String>,
+    },
+    /// CapCut-style freeze at `time`: splits `clip_id`, inserts a still of
+    /// `duration` on the same track, and ripples later clips on that track
+    /// by `duration`. Video needs a probed `still` (host-extracted jpg);
+    /// image clips may omit it and reuse their media. Audio and text are
+    /// no-ops. `created_id` is the freeze clip.
+    FreezeFrame {
+        /// The picture clip under the playhead.
+        clip_id: String,
+        /// Timeline playhead; must fall strictly inside the clip.
+        time: f64,
+        /// Editorial length of the hold. Floored at [`MIN_CLIP_DURATION`];
+        /// when absent or non-positive, uses [`DEFAULT_FREEZE_DURATION`].
+        #[cfg_attr(feature = "types", ts(optional))]
+        #[serde(default)]
+        duration: Option<f64>,
+        /// Probed still file. Required for video; ignored for image when
+        /// reusing the existing media.
+        #[cfg_attr(feature = "types", ts(optional))]
+        #[serde(default)]
+        still: Option<NewMedia>,
+    },
+    /// Places many bin items at explicit starts and durations on one track
+    /// as a single undo step. The UI plans beat-aligned stills; this lands
+    /// them. Unknown media ids are skipped. A missing track id picks the
+    /// first free lane for the whole span (or the bottom track).
+    PlaceImageClips {
+        /// Ordered placements (media + start + duration).
+        placements: Vec<ImagePlacement>,
+        /// Destination lane. None picks first free for the full span.
+        #[cfg_attr(feature = "types", ts(optional))]
+        #[serde(default)]
+        track_id: Option<String>,
+    },
     /// Rejoins split pieces into the earliest piece, which keeps its id.
     /// Errs with a user-facing sentence ([`why_not_merge`]) unless the
     /// pieces sit on one track, come from one file at one speed, touch
@@ -356,9 +420,27 @@ pub enum Command {
         /// The video clip - or its detached sound.
         clip_id: String,
     },
+    /// Sets a clip's source in-point without changing its timeline length.
+    /// Used by the beat-gap source slider: the clip still spans the same
+    /// beats, but a different window of the media plays inside them.
+    /// Clamped so `source_start + duration * speed` stays inside the media
+    /// when a duration is known. Unknown clips are a no-op.
+    SetClipSourceStart {
+        /// The clip to retime.
+        clip_id: String,
+        /// New media in-point in seconds, floored at 0.
+        source_start: f64,
+    },
     /// Appends a lane named after the highest "Track N" in use, minting a
     /// "t" id.
     AddTrack,
+    /// Moves a lane to a new position in the stack. An unknown id is a no-op.
+    ReorderTracks {
+        /// The lane to move.
+        track_id: String,
+        /// Its destination index, clamped to the last lane.
+        to_index: usize,
+    },
     /// Deletes a lane and every clip on it. Errs at the floor of one track.
     RemoveTrack {
         /// The lane to delete.
@@ -930,6 +1012,209 @@ pub fn apply(
             Ok(Outcome { created_id: created, applied })
         }
 
+        Command::DuplicateClips { clip_ids } => {
+            let timeline = project.active_mut();
+            let mut created = None;
+            // Right-to-left by start so multi-select copies of neighbours do
+            // not land on top of each other when each sits at end-of-original.
+            let mut ordered: Vec<Clip> = clip_ids
+                .iter()
+                .filter_map(|id| timeline.clip(id).cloned())
+                .collect();
+            ordered.sort_by(|left, right| right.start.total_cmp(&left.start));
+            for clip in ordered {
+                let mut copy = clip.clone();
+                copy.id = mint.next("c");
+                copy.start = clip.start + clip.duration;
+                // The cut into the original keeps its transition; the copy
+                // is a fresh placement, not another cut at that join.
+                copy.transition_in = None;
+                // A detached-audio link is one-to-one with the source video;
+                // the duplicate must stand alone.
+                copy.detached_from = None;
+                created = Some(copy.id.clone());
+                timeline.clips.push(copy);
+            }
+            let applied = created.is_some();
+            Ok(Outcome { created_id: created, applied })
+        }
+
+        Command::FreezeFrame { clip_id, time, duration, still } => {
+            let hold = duration
+                .filter(|value| *value > 0.0)
+                .unwrap_or(DEFAULT_FREEZE_DURATION)
+                .max(MIN_CLIP_DURATION);
+
+            let (kind, media_id, track_id, start, clip_duration, speed, source_start, picture) = {
+                let timeline = project.active();
+                let Some(clip) = timeline.clip(&clip_id) else {
+                    return Ok(Outcome::default());
+                };
+                if clip.kind != ClipKind::Video && clip.kind != ClipKind::Image {
+                    return Ok(Outcome::default());
+                }
+                let offset = time - clip.start;
+                if offset <= MIN_CLIP_DURATION || offset >= clip.duration - MIN_CLIP_DURATION {
+                    return Ok(Outcome::default());
+                }
+                (
+                    clip.kind,
+                    clip.media_id.clone(),
+                    clip.track_id.clone(),
+                    clip.start,
+                    clip.duration,
+                    clip.speed,
+                    clip.source_start,
+                    (
+                        clip.scale,
+                        clip.offset_x,
+                        clip.offset_y,
+                        clip.rotation,
+                        clip.opacity,
+                        clip.video_effects.clone(),
+                        clip.name.clone(),
+                    ),
+                )
+            };
+
+            let freeze_media_id = if kind == ClipKind::Image && still.is_none() {
+                media_id
+            } else {
+                let Some(item) = still else {
+                    return Ok(Outcome::default());
+                };
+                if let Some(existing) =
+                    project.media.iter().find(|media| media.path == item.path)
+                {
+                    existing.id.clone()
+                } else {
+                    let id = mint.next("m");
+                    project.media.push(MediaItem {
+                        id: id.clone(),
+                        path: item.path,
+                        name: item.name,
+                        duration: item.duration,
+                        kind: MediaKind::Image,
+                        width: item.width,
+                        height: item.height,
+                        frame_rate: item.frame_rate,
+                        frame_rate_fraction: item.frame_rate_fraction,
+                        video_codec: item.video_codec,
+                        audio_codec: None,
+                        has_audio: false,
+                        placeholder: false,
+                    });
+                    id
+                }
+            };
+
+            let timeline = project.active_mut();
+            let Some(index) = timeline.clips.iter().position(|clip| clip.id == clip_id) else {
+                return Ok(Outcome::default());
+            };
+            let offset = time - start;
+            let mut tail = timeline.clips[index].clone();
+            tail.id = mint.next("c");
+            tail.start = time;
+            tail.duration = clip_duration - offset;
+            tail.source_start = source_start + offset * speed;
+            tail.transition_in = None;
+            timeline.clips[index].duration = offset;
+            timeline.clips.insert(index + 1, tail);
+
+            // Ripple every later placement on this track (including the new
+            // tail) so the freeze does not sit on top of the remainder.
+            for clip in &mut timeline.clips {
+                if clip.track_id == track_id && clip.start >= time {
+                    clip.start += hold;
+                }
+            }
+
+            let freeze_id = mint.next("c");
+            let (scale, offset_x, offset_y, rotation, opacity, video_effects, name) = picture;
+            timeline.clips.push(Clip {
+                id: freeze_id.clone(),
+                track_id,
+                media_id: freeze_media_id,
+                name,
+                kind: ClipKind::Image,
+                start: time,
+                duration: hold,
+                source_start: 0.0,
+                volume: 1.0,
+                fade_in: 0.0,
+                fade_out: 0.0,
+                scale,
+                offset_x,
+                offset_y,
+                rotation,
+                opacity,
+                speed: 1.0,
+                preserve_pitch: true,
+                filters: Vec::new(),
+                video_effects,
+                muted: None,
+                detached_from: None,
+                transition_in: None,
+                text: None,
+            });
+
+            Ok(Outcome { created_id: Some(freeze_id), applied: true })
+        }
+
+        Command::PlaceImageClips { placements, track_id } => {
+            if placements.is_empty() {
+                return Ok(Outcome::default());
+            }
+
+            // Resolve media first so a missing id cannot leave a half-applied
+            // batch of clips on the timeline.
+            let mut resolved = Vec::new();
+            for placement in &placements {
+                let Some(media) = project.media_by_id(&placement.media_id).cloned() else {
+                    continue;
+                };
+                let start = placement.start.max(0.0);
+                let duration = placement.duration.max(MIN_CLIP_DURATION);
+                resolved.push((media, start, duration, placement.source_start));
+            }
+            if resolved.is_empty() {
+                return Ok(Outcome::default());
+            }
+
+            let span_start = resolved
+                .iter()
+                .map(|(_, start, _, _)| *start)
+                .fold(f64::INFINITY, f64::min);
+            let span_end = resolved
+                .iter()
+                .map(|(_, start, duration, _)| start + duration)
+                .fold(f64::NEG_INFINITY, f64::max);
+            let span_duration = (span_end - span_start).max(MIN_CLIP_DURATION);
+
+            let timeline = project.active_mut();
+            let track_id = match track_id {
+                Some(id) if timeline.track(&id).is_some() => id,
+                Some(_) => return Err(CommandError::TrackGone),
+                None => first_free_track(timeline, span_start, span_duration)
+                    .ok_or(CommandError::NoTracks)?,
+            };
+
+            let mut created = None;
+            for (media, start, duration, source_start) in resolved {
+                let id = mint.next("c");
+                let mut clip = default_clip(id.clone(), track_id.clone(), &media, start);
+                clip.duration = duration;
+                if let Some(source) = source_start {
+                    clip.source_start = source.max(0.0);
+                }
+                created = Some(id);
+                timeline.clips.push(clip);
+            }
+            let applied = created.is_some();
+            Ok(Outcome { created_id: created, applied })
+        }
+
         Command::MergeClips { clip_ids } => {
             let timeline = project.active_mut();
             if let Some(reason) = why_not_merge(timeline, &clip_ids) {
@@ -1145,6 +1430,34 @@ pub fn apply(
             Ok(Outcome { created_id: None, applied: true })
         }
 
+        Command::SetClipSourceStart { clip_id, source_start } => {
+            let media_duration = {
+                let timeline = project.active();
+                let Some(clip) = timeline.clip(&clip_id) else {
+                    return Ok(Outcome::default());
+                };
+                project
+                    .media_by_id(&clip.media_id)
+                    .and_then(|media| media.duration)
+            };
+            let timeline = project.active_mut();
+            let Some(clip) = timeline.clip_mut(&clip_id) else {
+                return Ok(Outcome::default());
+            };
+            let speed = if clip.speed > 0.0 { clip.speed } else { 1.0 };
+            let needed = clip.duration * speed;
+            let max_start = media_duration
+                .map(|total| (total - needed).max(0.0))
+                .unwrap_or(f64::MAX);
+            let next = source_start.max(0.0).min(max_start);
+            let applied = (clip.source_start - next).abs() > f64::EPSILON;
+            clip.source_start = next;
+            Ok(Outcome {
+                created_id: None,
+                applied,
+            })
+        }
+
         Command::AddTrack => {
             let timeline = project.active_mut();
             let id = mint.next("t");
@@ -1152,6 +1465,21 @@ pub fn apply(
                 next_numbered("Track", timeline.tracks.iter().map(|track| track.name.clone()));
             timeline.tracks.push(Track { id: id.clone(), name, visible: true, muted: false });
             Ok(Outcome { created_id: Some(id), applied: true })
+        }
+
+        Command::ReorderTracks { track_id, to_index } => {
+            let timeline = project.active_mut();
+            let Some(from_index) = timeline.tracks.iter().position(|track| track.id == track_id)
+            else {
+                return Ok(Outcome::default());
+            };
+            let to_index = to_index.min(timeline.tracks.len() - 1);
+            if to_index == from_index {
+                return Ok(Outcome::default());
+            }
+            let track = timeline.tracks.remove(from_index);
+            timeline.tracks.insert(to_index, track);
+            Ok(Outcome { created_id: None, applied: true })
         }
 
         Command::RemoveTrack { track_id } => {

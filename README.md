@@ -24,6 +24,12 @@ or subscriptions. A native Rust engine does the heavy lifting, a clean React
 interface does the editing, and it all runs on your machine: install it and
 start cutting, no account, no extra downloads, no setup.
 
+> **This tree ships as [CtrlBeat](CTRLBEAT.md)** - a named product on top of
+> Concat, with beat placement, visualizer, ASCII overlays, and a Windows
+> installer under `releases/`. Brand assets: [brandkit/](brandkit/).
+> Credits: [ATTRIBUTION.md](ATTRIBUTION.md). Engineering changelog:
+> [FORK_NOTES.md](FORK_NOTES.md).
+
 ## Highlights
 
 - Free and local Text-to-Speech features.

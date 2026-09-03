@@ -245,7 +245,7 @@ async function loadPeaks(path: string, project: string | null): Promise<Peaks | 
   try {
     return decodePeaks(await extractPeaks(path, project));
   } catch (cause) {
-    console.warn(`WolfCut: no waveform for ${path}`, cause);
+    console.warn(`CtrlBeat: no waveform for ${path}`, cause);
     return null;
   }
 }
@@ -256,7 +256,7 @@ async function loadImage(path: string): Promise<ImageBitmap | null> {
     const bytes = await readMediaBytes(path);
     return await createImageBitmap(new Blob([bytes]));
   } catch (cause) {
-    console.warn(`WolfCut: could not decode ${path}`, cause);
+    console.warn(`CtrlBeat: could not decode ${path}`, cause);
     return null;
   }
 }
@@ -288,7 +288,7 @@ async function loadStrip(
     // stall the timeline.
     return await createImageBitmap(new Blob([bytes], { type: "image/jpeg" }));
   } catch (cause) {
-    console.warn(`WolfCut: no filmstrip for ${path}`, cause);
+    console.warn(`CtrlBeat: no filmstrip for ${path}`, cause);
     return null;
   }
 }

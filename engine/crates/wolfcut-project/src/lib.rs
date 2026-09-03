@@ -34,7 +34,7 @@ pub use model::Project;
 mod tests {
     use serde_json::json;
 
-    use crate::commands::{ClipMove, ClipPatch, Command, TrackFlag, TrimEdge};
+    use crate::commands::{ClipMove, ClipPatch, Command, ImagePlacement, TrackFlag, TrimEdge};
     use crate::doc::DocumentSettings;
     use crate::editor::Editor;
     use crate::model::{ClipKind, MediaKind, TextStyle};
@@ -118,6 +118,180 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_places_an_independent_copy_after_the_original() {
+        let (mut editor, _, clip_id) = fixture();
+        let copy_id = editor
+            .apply(Command::DuplicateClips { clip_ids: vec![clip_id.clone()] })
+            .expect("duplicates")
+            .created_id
+            .expect("id");
+        let clips = &editor.project().active().clips;
+        assert_eq!(clips.len(), 2);
+        let original = clips.iter().find(|clip| clip.id == clip_id).expect("original");
+        let copy = clips.iter().find(|clip| clip.id == copy_id).expect("copy");
+        assert_eq!(copy.start, original.start + original.duration);
+        assert_eq!(copy.duration, original.duration);
+        assert_eq!(copy.source_start, original.source_start);
+        assert_eq!(copy.media_id, original.media_id);
+        assert_ne!(copy.id, original.id);
+        assert!(copy.detached_from.is_none());
+        assert!(copy.transition_in.is_none());
+    }
+
+    fn image_media(path: &str) -> Command {
+        Command::AddMedia {
+            item: crate::commands::NewMedia {
+                path: path.to_owned(),
+                name: path.rsplit('/').next().unwrap_or(path).to_owned(),
+                duration: None,
+                kind: MediaKind::Image,
+                width: Some(1280),
+                height: Some(720),
+                frame_rate: None,
+                frame_rate_fraction: None,
+                video_codec: None,
+                audio_codec: None,
+                has_audio: false,
+            },
+        }
+    }
+
+    #[test]
+    fn place_image_clips_lands_beat_grid_as_one_edit() {
+        let mut editor = Editor::new();
+        let m1 = editor.apply(image_media("/a.jpg")).expect("ok").created_id.expect("id");
+        let m2 = editor.apply(image_media("/b.jpg")).expect("ok").created_id.expect("id");
+        let m3 = editor.apply(image_media("/c.jpg")).expect("ok").created_id.expect("id");
+        let track_id = editor.project().active().tracks[0].id.clone();
+
+        let outcome = editor
+            .apply(Command::PlaceImageClips {
+                placements: vec![
+                    ImagePlacement { media_id: m1.clone(), start: 0.0, duration: 1.0, source_start: None },
+                    ImagePlacement { media_id: m2.clone(), start: 1.0, duration: 1.0, source_start: None },
+                    ImagePlacement { media_id: m3.clone(), start: 2.0, duration: 1.5, source_start: None },
+                ],
+                track_id: Some(track_id.clone()),
+            })
+            .expect("places");
+        assert!(outcome.applied);
+        assert!(outcome.created_id.is_some());
+
+        let clips = &editor.project().active().clips;
+        assert_eq!(clips.len(), 3);
+        let mut ordered = clips.clone();
+        ordered.sort_by(|a, b| a.start.total_cmp(&b.start));
+        assert_eq!(ordered[0].media_id, m1);
+        assert_eq!(ordered[0].start, 0.0);
+        assert_eq!(ordered[0].duration, 1.0);
+        assert_eq!(ordered[1].media_id, m2);
+        assert_eq!(ordered[1].start, 1.0);
+        assert_eq!(ordered[2].media_id, m3);
+        assert_eq!(ordered[2].start, 2.0);
+        assert_eq!(ordered[2].duration, 1.5);
+        assert!(ordered.iter().all(|clip| clip.track_id == track_id));
+        assert!(ordered.iter().all(|clip| clip.kind == ClipKind::Image));
+
+        // One undo removes the whole beat placement.
+        editor.undo();
+        assert!(editor.project().active().clips.is_empty());
+    }
+
+    #[test]
+    fn beat_placed_image_clip_can_be_reordered_via_move_clips() {
+        let mut editor = Editor::new();
+        let m1 = editor.apply(image_media("/a.jpg")).expect("ok").created_id.expect("id");
+        let m2 = editor.apply(image_media("/b.jpg")).expect("ok").created_id.expect("id");
+        let track_id = editor.project().active().tracks[0].id.clone();
+        editor
+            .apply(Command::PlaceImageClips {
+                placements: vec![
+                    ImagePlacement { media_id: m1.clone(), start: 0.0, duration: 1.0, source_start: None },
+                    ImagePlacement { media_id: m2.clone(), start: 1.0, duration: 1.0, source_start: None },
+                ],
+                track_id: Some(track_id.clone()),
+            })
+            .expect("places");
+
+        let first_id = editor
+            .project()
+            .active()
+            .clips
+            .iter()
+            .find(|clip| clip.media_id == m1)
+            .expect("first")
+            .id
+            .clone();
+        editor
+            .apply(Command::MoveClips {
+                moves: vec![ClipMove {
+                    clip_id: first_id.clone(),
+                    start: 3.0,
+                    track_id: track_id.clone(),
+                }],
+            })
+            .expect("moves");
+
+        let moved = editor
+            .project()
+            .active()
+            .clips
+            .iter()
+            .find(|clip| clip.id == first_id)
+            .expect("moved");
+        assert_eq!(moved.start, 3.0);
+        assert_eq!(moved.media_id, m1, "reorder keeps the same media");
+        assert_eq!(moved.duration, 1.0);
+    }
+
+    #[test]
+    fn freeze_frame_inserts_a_still_and_ripples_the_tail() {
+        let (mut editor, _, clip_id) = fixture();
+        let freeze_id = editor
+            .apply(Command::FreezeFrame {
+                clip_id: clip_id.clone(),
+                time: 4.0,
+                duration: Some(1.0),
+                still: Some(crate::commands::NewMedia {
+                    path: "/freeze.jpg".to_owned(),
+                    name: "freeze.jpg".to_owned(),
+                    duration: None,
+                    kind: MediaKind::Image,
+                    width: Some(1920),
+                    height: Some(1080),
+                    frame_rate: None,
+                    frame_rate_fraction: None,
+                    video_codec: None,
+                    audio_codec: None,
+                    has_audio: false,
+                }),
+            })
+            .expect("freezes")
+            .created_id
+            .expect("id");
+
+        let clips = &editor.project().active().clips;
+        assert_eq!(clips.len(), 3);
+        let head = clips.iter().find(|clip| clip.id == clip_id).expect("head");
+        let freeze = clips.iter().find(|clip| clip.id == freeze_id).expect("freeze");
+        let tail = clips
+            .iter()
+            .find(|clip| clip.id != clip_id && clip.id != freeze_id)
+            .expect("tail");
+        assert_eq!(head.duration, 4.0);
+        assert_eq!(freeze.kind, ClipKind::Image);
+        assert_eq!(freeze.start, 4.0);
+        assert_eq!(freeze.duration, 1.0);
+        assert_eq!(tail.start, 5.0);
+        assert_eq!(tail.source_start, 4.0);
+        assert_eq!(tail.duration, 6.0);
+        assert!(
+            editor.project().media.iter().any(|item| item.path == "/freeze.jpg"),
+            "still lands in the bin"
+        );
+    }
+
+    #[test]
     fn rearranged_pieces_refuse_to_merge() {
         let (mut editor, _, clip_id) = fixture();
         editor
@@ -174,9 +348,17 @@ mod tests {
         let timeline = editor.project().active();
         assert_eq!(timeline.clips.len(), 2);
         let sound = timeline.clip(&sound_id).expect("exists");
+        let video = timeline.clip(&clip_id).expect("exists");
         assert_eq!(sound.kind, ClipKind::Audio);
         assert_eq!(sound.detached_from.as_deref(), Some(clip_id.as_str()));
-        assert_eq!(timeline.clip(&clip_id).expect("exists").muted, Some(true));
+        assert_eq!(sound.media_id, video.media_id);
+        assert_eq!(sound.start, video.start);
+        assert_eq!(sound.duration, video.duration);
+        assert_eq!(sound.source_start, video.source_start);
+        assert_eq!(sound.speed, video.speed);
+        assert_eq!(sound.volume, 1.0);
+        assert_eq!(sound.muted, None);
+        assert_eq!(video.muted, Some(true));
 
         editor.apply(Command::ReattachAudio { clip_id: sound_id }).expect("reattaches");
         let timeline = editor.project().active();
@@ -782,6 +964,39 @@ mod tests {
     }
 
     #[test]
+    fn reordering_tracks_preserves_clips_and_undo_restores_the_order() {
+        let (mut editor, media_id, first_clip_id) = fixture();
+        let original_order: Vec<String> =
+            editor.project().active().tracks.iter().map(|track| track.id.clone()).collect();
+        let first_track_id = original_order[0].clone();
+        let second_track_id = original_order[1].clone();
+        let second_clip_id = editor
+            .apply(Command::AddClip {
+                media_id,
+                track_id: second_track_id.clone(),
+                start: 0.0,
+            })
+            .expect("adds")
+            .created_id
+            .expect("id");
+
+        editor
+            .apply(Command::ReorderTracks { track_id: first_track_id.clone(), to_index: 1 })
+            .expect("reorders");
+
+        let timeline = editor.project().active();
+        assert_eq!(timeline.tracks[0].id, second_track_id);
+        assert_eq!(timeline.tracks[1].id, first_track_id);
+        assert_eq!(timeline.clip(&first_clip_id).expect("first clip").track_id, first_track_id);
+        assert_eq!(timeline.clip(&second_clip_id).expect("second clip").track_id, second_track_id);
+
+        assert!(editor.undo());
+        let restored_order: Vec<String> =
+            editor.project().active().tracks.iter().map(|track| track.id.clone()).collect();
+        assert_eq!(restored_order, original_order);
+    }
+
+    #[test]
     fn removing_a_track_takes_its_clips_and_stops_at_the_floor_of_one() {
         let (mut editor, _, _) = fixture();
         let track_id = editor.project().active().tracks[0].id.clone();
@@ -1047,6 +1262,7 @@ mod tests {
             Command::DetachAudio { clip_id: "c1".to_owned() },
             Command::ReattachAudio { clip_id: "c1".to_owned() },
             Command::AddTrack,
+            Command::ReorderTracks { track_id: "T1".to_owned(), to_index: 2 },
             Command::RemoveTrack { track_id: "T1".to_owned() },
             Command::RenameTrack { track_id: "T1".to_owned(), name: "Cutaways".to_owned() },
             Command::SetTrackFlag {

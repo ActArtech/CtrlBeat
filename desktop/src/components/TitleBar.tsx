@@ -3,7 +3,9 @@ import type { ReactNode } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import logo from "../assets/concat-logo.png";
+import markDarkUi from "../assets/brand/titlebar-32.png";
+import markLightUi from "../assets/brand/titlebar-32-light.png";
+import { BRAND } from "../lib/brand";
 import { useLocale } from "../lib/i18n";
 import type { Theme } from "../lib/theme";
 import { Icon } from "./Icon";
@@ -92,8 +94,15 @@ export const TitleBar = memo(function TitleBar({
       }`}
     >
       <span className="flex items-center gap-1.5 pr-1" data-tauri-drag-region>
-        <img src={logo} alt="" className="pointer-events-none h-4 w-4" draggable={false} />
-        <span className="font-display text-[13px] font-bold tracking-tight text-primary">WolfCut</span>
+        <img
+          src={theme === "dark" ? markDarkUi : markLightUi}
+          alt=""
+          className="pointer-events-none h-4 w-4 rounded-[3px]"
+          draggable={false}
+        />
+        <span className="font-display text-[13px] font-bold tracking-tight text-primary">
+          {BRAND.name}
+        </span>
       </span>
 
       <nav className="flex items-center">

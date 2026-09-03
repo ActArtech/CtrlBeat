@@ -14,6 +14,10 @@ mod playback;
 mod projects;
 mod templates;
 mod transcribe;
+#[cfg(feature = "tts")]
+mod tts;
+#[cfg(not(feature = "tts"))]
+#[path = "tts_stub.rs"]
 mod tts;
 
 use serde::Serialize;
@@ -54,10 +58,14 @@ pub struct MediaSummary {
     audio: Option<AudioStreamInfo>,
 }
 
-/// Extensions WolfCut is willing to treat as stills.
-const IMAGE_EXTENSIONS: &[&str] = &[
-    "png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "avif", "heic", "heif", "gif",
+/// Photo / still extensions. Always treated as images even when ffprobe
+/// invents a duration (common for HEIC/AVIF/JPEG).
+const STILL_EXTENSIONS: &[&str] = &[
+    "png", "jpg", "jpeg", "bmp", "tif", "tiff", "avif", "heic", "heif",
 ];
+
+/// Container formats that may be a still *or* a multi-frame animation.
+const ANIM_IMAGE_EXTENSIONS: &[&str] = &["gif", "webp"];
 
 /// Decides whether a file is footage, sound or a still.
 ///
@@ -65,10 +73,9 @@ const IMAGE_EXTENSIONS: &[&str] = &[
 /// ffprobe is genuinely ambiguous here: a PNG presents as a one-frame video
 /// stream, usually with `r_frame_rate` of 25/1 invented by the demuxer.
 ///
-/// The duration check is what separates a still from an animation. An animated
-/// GIF or WebP reports a duration; a single image does not. It is a heuristic,
-/// and a deliberately conservative one - misreading an animation as a still
-/// shows its first frame rather than failing.
+/// HEIC/AVIF often report a tiny container duration; those must stay images
+/// so beat placement and the bin filter treat them as photos. Animated GIF /
+/// WebP keep the duration check so multi-frame files stay video.
 fn classify(info: &wolfcut_media::MediaInfo) -> &'static str {
     if info.video.is_none() {
         return "audio";
@@ -81,11 +88,15 @@ fn classify(info: &wolfcut_media::MediaInfo) -> &'static str {
         .unwrap_or_default()
         .to_ascii_lowercase();
 
-    if IMAGE_EXTENSIONS.contains(&extension.as_str()) && info.duration.is_none() {
-        "image"
-    } else {
-        "video"
+    if STILL_EXTENSIONS.contains(&extension.as_str()) {
+        return "image";
     }
+
+    if ANIM_IMAGE_EXTENSIONS.contains(&extension.as_str()) && info.duration.is_none() {
+        return "image";
+    }
+
+    "video"
 }
 
 impl From<wolfcut_media::MediaInfo> for MediaSummary {
@@ -329,6 +340,76 @@ async fn write_artwork(project: String, key: String, bytes: Vec<u8>) -> Result<(
     })
     .await
     .map_err(|error| format!("artwork task failed: {error}"))?
+}
+
+/// Decodes mono f32 PCM for offline beat detection.
+///
+/// Downmixes to one channel at `sample_rate` (default 22050) so long songs
+/// stay small enough for the webview. Returns little-endian f32 samples as
+/// raw bytes; the UI rebuilds a Float32Array and runs `detectBeatsFromPcm`.
+#[tauri::command]
+async fn decode_audio_pcm(path: String, sample_rate: u32) -> Result<tauri::ipc::Response, String> {
+    let rate = if sample_rate == 0 { 22050 } else { sample_rate };
+    let bytes = tauri::async_runtime::spawn_blocking(move || decode_pcm_mono(&path, rate))
+        .await
+        .map_err(|error| format!("pcm task failed: {error}"))??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+fn decode_pcm_mono(path: &str, sample_rate: u32) -> Result<Vec<u8>, String> {
+    let output = wolfcut_media::command(wolfcut_media::ffmpeg())
+        .args(["-hide_banner", "-nostdin", "-loglevel", "error"])
+        .args(["-i", path])
+        .args([
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            &sample_rate.to_string(),
+            "-f",
+            "f32le",
+            "pipe:1",
+        ])
+        .output()
+        .map_err(|error| format!("could not run ffmpeg: {error}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("ffmpeg could not decode audio from {path}: {stderr}"));
+    }
+    if output.stdout.is_empty() {
+        return Err(format!("no PCM decoded from {path}"));
+    }
+    Ok(output.stdout)
+}
+
+/// Grabs one JPEG still from a media file at `time` seconds of source.
+///
+/// Used by freeze-frame: the host writes the bytes into the project cache,
+/// probes the result, then sends `freezeFrame` with that still. Seeking is
+/// input-side (`-ss` before `-i`) so long files do not decode from zero.
+#[tauri::command]
+async fn extract_still(path: String, time: f64) -> Result<tauri::ipc::Response, String> {
+    let bytes = tauri::async_runtime::spawn_blocking(move || still_frame(&path, time))
+        .await
+        .map_err(|error| format!("still task failed: {error}"))??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+fn still_frame(path: &str, time: f64) -> Result<Vec<u8>, String> {
+    let mut command = wolfcut_media::command(wolfcut_media::ffmpeg());
+    command.args(["-hide_banner", "-nostdin", "-loglevel", "error"]);
+    if time > 0.0 {
+        command.args(["-ss", &format!("{time:.3}")]);
+    }
+    let output = command
+        .args(["-i", path])
+        .args(["-frames:v", "1", "-q:v", "2", "-f", "mjpeg", "pipe:1"])
+        .output()
+        .map_err(|error| format!("could not run ffmpeg: {error}"))?;
+    if !output.status.success() || output.stdout.is_empty() {
+        return Err(format!("no still frame at {time:.3}s for {path}"));
+    }
+    Ok(output.stdout)
 }
 
 /// Renders a strip of evenly spaced frames from a video as one JPEG.
@@ -889,6 +970,8 @@ pub fn run() {
             transport_pause,
             transport_seek,
             extract_filmstrip,
+            extract_still,
+            decode_audio_pcm,
             read_artwork,
             write_artwork,
             create_project,

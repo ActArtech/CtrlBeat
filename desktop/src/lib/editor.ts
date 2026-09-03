@@ -303,6 +303,21 @@ export function commandsForEcho(base: Clip, patch: Partial<Clip>): EditorCommand
       ? patch.duration !== base.duration
       : false;
   const startChanged = has("start") && patch.start !== undefined && patch.start !== base.start;
+  // Trim already moves sourceStart in the engine. Only emit a dedicated
+  // setClipSourceStart when the in-point alone is being scrubbed (beat-gap slider).
+  if (
+    has("sourceStart") &&
+    patch.sourceStart !== undefined &&
+    patch.sourceStart !== base.sourceStart &&
+    !durationChanged &&
+    !startChanged
+  ) {
+    commands.push({
+      op: "setClipSourceStart",
+      clipId: base.id,
+      sourceStart: patch.sourceStart,
+    });
+  }
   // Same-value guard, like start: an echoed-but-unchanged track must not
   // commit a do-nothing MoveClips, which would burn an empty undo step.
   const trackChanged =

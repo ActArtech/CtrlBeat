@@ -1,9 +1,11 @@
 import { useCallback, useLayoutEffect, useState } from "react";
 
+import { storageGet, storageSet } from "./brand";
+
 /**
  * Light or dark, chosen explicitly.
  *
- * WolfCut defaults to light whatever the OS is set to. A creative tool that
+ * CtrlBeat defaults to light whatever the OS is set to. A creative tool that
  * inverts itself because of a system setting the user was not thinking about
  * is disorienting, and judging an image against a surround that changed on its
  * own is worse than disorienting.
@@ -13,15 +15,14 @@ import { useCallback, useLayoutEffect, useState } from "react";
  */
 export type Theme = "light" | "dark";
 
-const STORAGE_KEY = "wolfcut.theme";
+const STORAGE_KEY = "ctrlbeat.theme";
+const LEGACY_BEATCUT_KEY = "beatcut.theme";
+const LEGACY_WOLFCUT_KEY = "wolfcut.theme";
 
 function stored(): Theme {
-  try {
-    return localStorage.getItem(STORAGE_KEY) === "dark" ? "dark" : "light";
-  } catch {
-    // Private mode, blocked storage - light is the default anyway.
-    return "light";
-  }
+  return storageGet(STORAGE_KEY, LEGACY_BEATCUT_KEY, LEGACY_WOLFCUT_KEY) === "dark"
+    ? "dark"
+    : "light";
 }
 
 /**
@@ -40,11 +41,7 @@ function applyTheme(theme: Theme): void {
 }
 
 function persist(theme: Theme): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, theme);
-  } catch {
-    // Not being able to remember the choice is not worth failing over.
-  }
+  storageSet(STORAGE_KEY, theme);
 }
 
 // At import time, before React renders anything, so the first paint and the

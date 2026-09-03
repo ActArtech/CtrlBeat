@@ -19,6 +19,8 @@ import {
   type TemplateInfo,
   type TemplateSlot,
 } from "../lib/engine";
+import startMark from "../assets/brand/start-screen-64.png";
+import { BRAND } from "../lib/brand";
 import { ErrorNotice } from "./ErrorNotice";
 import { useLocale, type MsgKey } from "../lib/i18n";
 import { relativeTime } from "../lib/time";
@@ -90,11 +92,11 @@ export function StartScreen({
   /** The chosen media per slot, keyed by the slot's media id. */
   const [fills, setFills] = useState<Record<string, SlotFill>>({});
 
-  // Default to Desktop/WolfCut. Failing to resolve it is not worth surfacing;
+  // Default to Desktop/CtrlBeat. Failing to resolve it is not worth surfacing;
   // the field simply starts empty and Choose still works.
   useEffect(() => {
     void desktopDir()
-      .then((desktop) => join(desktop, "WolfCut"))
+      .then((desktop) => join(desktop, BRAND.projectsFolder))
       .then(setLocation)
       .catch(() => undefined);
   }, []);
@@ -264,6 +266,22 @@ export function StartScreen({
               <Icon name="chevronRight" size={11} className="rotate-180" />
               {t("startScreen.allTemplates")}
             </button>
+          )}
+          {!template && (
+            <p className="mb-2 flex items-center gap-2 font-display text-[13px] font-bold tracking-tight text-accent">
+              <img
+                src={startMark}
+                alt=""
+                className="h-8 w-8 rounded-lg"
+                draggable={false}
+              />
+              <span>
+                {BRAND.name}
+                <span className="ml-2 font-sans text-[11px] font-normal tracking-normal text-tertiary">
+                  {t("brand.tagline")}
+                </span>
+              </span>
+            </p>
           )}
           <h1 className="font-display text-[34px] font-semibold leading-tight tracking-[-0.03em] text-primary">
             {template ? template.name : t("startScreen.newProject")}

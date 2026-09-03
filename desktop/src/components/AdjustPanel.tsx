@@ -1,4 +1,5 @@
-import { MAX_SCALE, MIN_SCALE, type Clip } from "../lib/editor";
+import { maxSourceStart } from "../lib/beatPlacement";
+import { MAX_SCALE, MIN_SCALE, type Clip, type MediaItem } from "../lib/editor";
 import { t, useLocale } from "../lib/i18n";
 import { Group, Slider, Toggle } from "./controls";
 import { Icon } from "./Icon";
@@ -48,11 +49,14 @@ function formatDecibels(decibels: number): string {
  */
 export function AdjustPanel({
   clip,
+  media,
   onChange,
   onCommit,
   onSpeedChange,
 }: {
   clip: Clip | null;
+  /** Bin media for the clip - used by the beat-gap source slider. */
+  media?: MediaItem | null;
   /** Live change - echoed locally while the gesture is in flight. */
   onChange: (patch: Partial<Clip>) => void;
   /** Gesture finished - the accumulated change becomes one engine command. */
@@ -74,9 +78,29 @@ export function AdjustPanel({
   const hasPicture = clip.kind === "video" || clip.kind === "image";
   // A still is picture only: no gain to set, nothing a fade could quieten.
   const hasSound = clip.kind !== "image";
+  const sourceMax = maxSourceStart(media?.duration, clip.duration, clip.speed);
+  const showSourceWindow = clip.kind === "video" && sourceMax > 0.05;
 
   return (
     <div className="px-3 py-3">
+      {showSourceWindow && (
+        <Group title={t("adjust.sourceWindow")} help={t("adjust.sourceWindowHelp")}>
+          <Slider
+            label={t("adjust.sourceStart")}
+            value={clip.sourceStart}
+            min={0}
+            max={sourceMax}
+            step={0.01}
+            format={(value) => `${value.toFixed(2)}s`}
+            onReset={() => {
+              onChange({ sourceStart: 0 });
+              onCommit();
+            }}
+            onChange={(sourceStart) => onChange({ sourceStart })}
+            onCommit={onCommit}
+          />
+        </Group>
+      )}
       {hasPicture && (
         <Group title={t("adjust.transform")} help={t("adjust.transformHelp")}>
           <Slider

@@ -24,7 +24,11 @@ function peaks(min: number[], max: number[], bucketsPerSecond = 200): Peaks {
   };
 }
 
-const roundTrip = (source: Peaks) => decodePeaks(encodePeaks(source).buffer);
+const roundTrip = (source: Peaks): Peaks => {
+  const decoded = decodePeaks(encodePeaks(source).buffer);
+  if (!decoded) throw new Error("peaks round-trip decode failed");
+  return decoded;
+};
 
 describe("the peaks round-trip", () => {
   test("decode(encode(x)) preserves every bucket exactly", () => {
@@ -33,17 +37,17 @@ describe("the peaks round-trip", () => {
     const source = peaks([-1, -0.5, 0, -0.001], [1, 0.5, 0, 0.001]);
     const decoded = roundTrip(source);
     expect(decoded).not.toBeNull();
-    expect(decoded!.min).toEqual(source.min);
-    expect(decoded!.max).toEqual(source.max);
-    expect(decoded!.bucketsPerSecond).toBe(200);
+    expect(decoded.min).toEqual(source.min);
+    expect(decoded.max).toEqual(source.max);
+    expect(decoded.bucketsPerSecond).toBe(200);
   });
 
   test("a fractional bucket rate survives to Float32 precision", () => {
     // loadPeaks computes sampleRate / bucketSize, rarely a round number.
     const rate = 44100 / 220; // 200.4545...
     const decoded = roundTrip(peaks([0], [0], rate));
-    expect(decoded!.bucketsPerSecond).toBe(Math.fround(rate));
-    expect(decoded!.bucketsPerSecond).toBeCloseTo(rate, 4);
+    expect(decoded.bucketsPerSecond).toBe(Math.fround(rate));
+    expect(decoded.bucketsPerSecond).toBeCloseTo(rate, 4);
   });
 
   test("many arbitrary values survive within Float32 quantisation", () => {
@@ -53,10 +57,10 @@ describe("the peaks round-trip", () => {
     );
     const source = peaks(values.map((value) => -Math.abs(value)), values);
     const decoded = roundTrip(source);
-    expect(decoded!.min).toEqual(source.min);
-    expect(decoded!.max).toEqual(source.max);
+    expect(decoded.min).toEqual(source.min);
+    expect(decoded.max).toEqual(source.max);
     for (let index = 0; index < values.length; index += 1) {
-      expect(Math.abs(decoded!.max[index] - values[index])).toBeLessThanOrEqual(
+      expect(Math.abs(decoded.max[index] - values[index])).toBeLessThanOrEqual(
         Math.abs(Math.fround(values[index]) - values[index]) + Number.EPSILON,
       );
     }
@@ -64,24 +68,24 @@ describe("the peaks round-trip", () => {
 
   test("the extremes 0, 1 and -1 come back exact", () => {
     const decoded = roundTrip(peaks([-1, 0], [1, 0]));
-    expect(Array.from(decoded!.min)).toEqual([-1, 0]);
-    expect(Array.from(decoded!.max)).toEqual([1, 0]);
+    expect(Array.from(decoded.min)).toEqual([-1, 0]);
+    expect(Array.from(decoded.max)).toEqual([1, 0]);
   });
 
   test("a single bucket round-trips", () => {
     const decoded = roundTrip(peaks([-0.25], [0.75]));
-    expect(decoded!.min).toHaveLength(1);
-    expect(decoded!.min[0]).toBeCloseTo(-0.25, 10);
-    expect(decoded!.max[0]).toBeCloseTo(0.75, 10);
+    expect(decoded.min).toHaveLength(1);
+    expect(decoded.min[0]).toBeCloseTo(-0.25, 10);
+    expect(decoded.max[0]).toBeCloseTo(0.75, 10);
   });
 
   test("empty peaks round-trip as a valid header-only file", () => {
     const bytes = encodePeaks(peaks([], []));
     expect(bytes.byteLength).toBe(8);
     const decoded = decodePeaks(bytes.buffer);
-    expect(decoded).not.toBeNull();
-    expect(decoded!.min).toHaveLength(0);
-    expect(decoded!.max).toHaveLength(0);
+    if (!decoded) throw new Error("header-only decode failed");
+    expect(decoded.min).toHaveLength(0);
+    expect(decoded.max).toHaveLength(0);
   });
 });
 

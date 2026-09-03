@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 
 import en from "../locales/en.json";
 import zhCN from "../locales/zh-CN.json";
+import { storageGet, storageRemove, storageSet } from "./brand";
 
 /**
  * The UI language.
@@ -52,27 +53,20 @@ export type LocaleId = (typeof LOCALES)[number]["id"];
 // friendlier i18n.test.ts even runs.
 const CATALOGS: Record<LocaleId, Record<MsgKey, string>> = { en, "zh-CN": zhCN };
 
-const STORAGE_KEY = "wolfcut.locale";
+const STORAGE_KEY = "ctrlbeat.locale";
+const LEGACY_BEATCUT_KEY = "beatcut.locale";
+const LEGACY_WOLFCUT_KEY = "wolfcut.locale";
 
 /** The stored preference: an explicit locale, or absence meaning "system". */
 function stored(): LocaleId | "system" {
-  try {
-    const value = localStorage.getItem(STORAGE_KEY);
-    const known = LOCALES.find((entry) => entry.id === value);
-    return known ? known.id : "system";
-  } catch {
-    // Private mode, blocked storage, node - the system default anyway.
-    return "system";
-  }
+  const value = storageGet(STORAGE_KEY, LEGACY_BEATCUT_KEY, LEGACY_WOLFCUT_KEY);
+  const known = LOCALES.find((entry) => entry.id === value);
+  return known ? known.id : "system";
 }
 
 function persist(next: LocaleId | "system"): void {
-  try {
-    if (next === "system") localStorage.removeItem(STORAGE_KEY);
-    else localStorage.setItem(STORAGE_KEY, next);
-  } catch {
-    // Not being able to remember the choice is not worth failing over.
-  }
+  if (next === "system") storageRemove(STORAGE_KEY);
+  else storageSet(STORAGE_KEY, next);
 }
 
 /** "system" resolved against what we actually ship: exact id, then language prefix, then en. */

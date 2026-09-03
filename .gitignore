@@ -79,3 +79,17 @@ desktop/desktop/
 # desktop/src/lib/generated/ via scripts/generate-ipc-types.sh; this appears
 # only when the `types` feature's tests run without TS_RS_EXPORT_DIR set.
 desktop/src-tauri/bindings/
+
+# Tauri release bundles (installers/MSIs) are build artifacts, not source.
+/releases/
+
+# Local editor/tool temp files
+*.tmp
+
+
+
+# Design-tool one-off PNG dumps in master/ (keep SVG + rendered logo-full*.png)
+brandkit/master/logo-full 5.png
+brandkit/master/logo-full-dark 1.png
+brandkit/master/logo-mark 1.png
+brandkit/master/logo-mark-dark 1.png

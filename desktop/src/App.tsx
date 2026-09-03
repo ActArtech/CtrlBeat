@@ -51,15 +51,39 @@ import {
 import {
   editorSave,
   engineVersion,
+  extractStill,
   newMediaFromSummary,
   probeMedia,
   readMediaBytes,
   templateSave,
+  writeCacheFile,
   type TemplateInfo,
 } from "./lib/engine";
+import { planMediaOnBeats } from "./lib/beatPlacement";
+import { snapToNearest } from "./lib/beatTimeline";
+import { beatPulseIntensity } from "./lib/codevice/beatPulse";
+import { canvasToJpegBytes, renderBeatSymbols } from "./lib/codevice/renderBeatSymbols";
+import { type SymbolSetId } from "./lib/codevice/symbolSets";
+import {
+  loadImageFromBytes,
+  processFrameToAscii,
+} from "./lib/codevice/videoAsciiEngine";
+import { renderMusicVisualizer } from "./lib/codevice/musicVisualizer";
+import { asciiPaletteById } from "./lib/codevice/asciiPalettes";
+import { selectBeatTimes } from "./lib/beatPlacement";
+import {
+  clampScale,
+  displayedSize,
+  scaleToFitHeight,
+  scaleToFitWidth,
+  scaleToMatchHeight,
+  scaleToMatchWidth,
+} from "./lib/clipFit";
 import { findTransition } from "./lib/effects";
 import { familyForPath, registerFont } from "./lib/text";
 import { useLocale } from "./lib/i18n";
+import { useAsciiOverlay } from "./hooks/useAsciiOverlay";
+import { useBeatsWorkflow } from "./hooks/useBeatsWorkflow";
 import { useCaptions } from "./hooks/useCaptions";
 import { useEngineSession } from "./hooks/useEngineSession";
 import { useEngineTruth } from "./hooks/useEngineTruth";
@@ -200,6 +224,36 @@ function Editor({
   const [rightTab, setRightTab] = useState<RightTab>("details");
   /** Families whose font files failed to load - shown in the picker. */
   const [missingFonts, setMissingFonts] = useState<Set<string>>(new Set());
+  /** Codeviceanim-style glyph set (13 presets) for beat-synced symbol clips. */
+  const [symbolSetId, setSymbolSetId] = useState<SymbolSetId>("techMap");
+  const [bakingSymbols, setBakingSymbols] = useState(false);
+  /** Sync mutex so Place + Export cannot double-bake. */
+  const bakeInflightRef = useRef<Promise<number> | null>(null);
+  /** Skip rebake when settings + beats have not changed. */
+  const lastBakeKeyRef = useRef("");
+  const {
+    asciiLivePreview,
+    setAsciiLivePreview,
+    asciiDriveMode,
+    setAsciiDriveMode,
+    overlaySurface,
+    setOverlaySurface,
+    visualizerPreset,
+    setVisualizerPreset,
+    visualizerLayout,
+    setVisualizerLayout,
+    asciiColorMode,
+    setAsciiColorMode,
+    asciiPaletteId,
+    setAsciiPaletteId,
+    asciiMotion,
+    setAsciiMotion,
+    vizColorMode,
+    setVizColorMode,
+    vizCount,
+    setVizCount,
+    voiceLevel,
+  } = useAsciiOverlay();
 
   // Panel geometry.
   // Wide enough that the library's five tabs and a row of cards breathe;
@@ -547,6 +601,396 @@ function Editor({
     onToast: pushToast,
   });
 
+  /** Resolve audio clip + media for beat analysis: selection, else under playhead. */
+  const resolveAudioForBeats = useCallback((): {
+    media: MediaItem;
+    clip: ReturnType<typeof findClip>;
+  } | null => {
+    const current = latest.current.project;
+    const selectedClip =
+      selectedClipIds.length === 1 ? findClip(current, selectedClipIds[0]) : null;
+    if (selectedClip && (selectedClip.kind === "audio" || selectedClip.kind === "video")) {
+      const media = findMedia(current, selectedClip.mediaId);
+      if (media && (media.hasAudio || media.kind === "audio")) {
+        return { media, clip: selectedClip };
+      }
+    }
+    const under = clipsAt(current, latest.current.playhead).find(
+      (clip) => clip.kind === "audio" || clip.kind === "video",
+    );
+    if (under) {
+      const media = findMedia(current, under.mediaId);
+      if (media && (media.hasAudio || media.kind === "audio")) {
+        return { media, clip: under };
+      }
+    }
+    const selectedMedia =
+      selectedMediaIds.length === 1 ? findMedia(current, selectedMediaIds[0]) : null;
+    if (selectedMedia && (selectedMedia.kind === "audio" || selectedMedia.hasAudio)) {
+      const clip =
+        current.timelines
+          .flatMap((timeline) => timeline.clips)
+          .find((item) => item.mediaId === selectedMedia.id) ?? null;
+      return { media: selectedMedia, clip };
+    }
+    return null;
+  }, [selectedClipIds, selectedMediaIds]);
+
+  const {
+    beatAnalysis,
+    timelineBeats,
+    setTimelineBeats,
+    analyzingBeats,
+    beatPresetId,
+    setBeatPresetId,
+    beatsPerImage,
+    setBeatsPerImage,
+    loopImagesUntilEnd,
+    setLoopImagesUntilEnd,
+    beatOffsetMs,
+    analyzeBeatsForSelection,
+    audioLevelAt,
+    beatBpm,
+    handleBeatOffset,
+    clearBeats,
+  } = useBeatsWorkflow({ resolveAudioForBeats, pushToast });
+
+  const placeSelectedImagesOnBeats = useCallback(() => {
+    if (timelineBeats.length === 0) {
+      pushToast(t("toast.placeNeedsBeats"), true);
+      return;
+    }
+    const current = latest.current.project;
+    const items = selectedMediaIds.flatMap((id) => {
+      const media = findMedia(current, id);
+      if (!media || (media.kind !== "image" && media.kind !== "video")) return [];
+      return [
+        {
+          mediaId: id,
+          kind: media.kind as "image" | "video",
+          mediaDuration: media.duration,
+        },
+      ];
+    });
+    if (items.length === 0) {
+      pushToast(t("toast.placeNeedsPictureMedia"), true);
+      return;
+    }
+    const endTime = (() => {
+      if (beatAnalysis?.clipId) {
+        const clip = findClip(current, beatAnalysis.clipId);
+        if (clip) {
+          const mediaLen = beatAnalysis.duration > 0 ? beatAnalysis.duration : clip.duration;
+          const speed = clip.speed > 0 ? clip.speed : 1;
+          return clip.start + (mediaLen - clip.sourceStart) / speed;
+        }
+      }
+      return beatAnalysis?.duration;
+    })();
+    const placements = planMediaOnBeats(items, timelineBeats, {
+      beatsPerImage,
+      loopImages: loopImagesUntilEnd,
+      endTime,
+      lastDuration: 5,
+      // Each beat gap shows source from 0 by default; Adjust slider moves the window.
+      progressVideos: false,
+    });
+    if (placements.length === 0) {
+      pushToast(t("toast.bakeEmpty"), true);
+      return;
+    }
+    void dispatch({
+      op: "placeImageClips",
+      placements,
+      trackId: null,
+    }).then((clipId) => {
+      if (!clipId) {
+        pushToast(t("toast.bakePlaceFailed"), true);
+        return;
+      }
+      setSelectedClipIds([clipId]);
+      pushToast(t("toast.mediaPlacedOnBeats", { count: String(placements.length) }), false);
+    });
+  }, [
+    timelineBeats,
+    beatAnalysis,
+    selectedMediaIds,
+    beatsPerImage,
+    loopImagesUntilEnd,
+    dispatch,
+    pushToast,
+    t,
+  ]);
+
+  const scrubWithBeatSnap = useCallback(
+    (time: number) => {
+      const threshold = latest.current.secondsPerPixel * 8;
+      const snapped =
+        snap && timelineBeats.length > 0
+          ? snapToNearest(time, timelineBeats, threshold)
+          : time;
+      transport.seek(snapped);
+    },
+    [snap, timelineBeats, transport],
+  );
+
+  /** Prefer a selected video clip, else a selected bin video, for ASCII. */
+  const resolveVideoForAscii = useCallback((): {
+    media: MediaItem;
+    clip: ReturnType<typeof findClip>;
+  } | null => {
+    const current = latest.current.project;
+    const selectedClip =
+      selectedClipIds.length === 1 ? findClip(current, selectedClipIds[0]) : null;
+    if (selectedClip?.kind === "video") {
+      const media = findMedia(current, selectedClip.mediaId);
+      if (media) return { media, clip: selectedClip };
+    }
+    const selectedMedia =
+      selectedMediaIds.length === 1 ? findMedia(current, selectedMediaIds[0]) : null;
+    if (selectedMedia?.kind === "video") {
+      return { media: selectedMedia, clip: null };
+    }
+    return null;
+  }, [selectedClipIds, selectedMediaIds]);
+
+  /**
+   * Bake code-symbol frames onto the beat grid.
+   *
+   * With a video selected: sample each beat's frame through the ASCII engine
+   * (codeviceanim-style). Without video: procedural glyph field that pulses
+   * on the beat.
+   */
+  /**
+   * Live overlay is preview-only. Export only sees real timeline clips, so
+   * ASCII / visualizer must be baked onto a top track before export.
+   *
+   * Returns frame count, or -1 when the same bake was already applied
+   * (settings + beats unchanged).
+   */
+  const bakeOverlayToTimeline = useCallback(
+    async (kind: "ascii" | "visualizer"): Promise<number> => {
+      if (bakeInflightRef.current) return bakeInflightRef.current;
+
+      const run = (async () => {
+        const usedBeats = selectBeatTimes(timelineBeats, { beatsPerImage });
+        if (usedBeats.length === 0) return 0;
+
+        const bakeKey = [
+          kind,
+          beatsPerImage,
+          visualizerPreset,
+          visualizerLayout,
+          vizColorMode,
+          vizCount,
+          symbolSetId,
+          asciiColorMode,
+          asciiPaletteId,
+          asciiMotion,
+          usedBeats.length,
+          usedBeats[0]?.toFixed(3),
+          usedBeats[usedBeats.length - 1]?.toFixed(3),
+        ].join("|");
+        if (lastBakeKeyRef.current === bakeKey) return -1;
+
+        const width = frame.width || 1920;
+        const height = frame.height || 1080;
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const offscreen = document.createElement("canvas");
+        const placements: { mediaId: string; start: number; duration: number }[] = [];
+        const videoSource = kind === "ascii" ? resolveVideoForAscii() : null;
+        const mode = videoSource ? "video" : "procedural";
+
+        const endCap = (() => {
+          const current = latest.current.project;
+          if (beatAnalysis?.clipId) {
+            const clip = findClip(current, beatAnalysis.clipId);
+            if (clip) {
+              const mediaLen =
+                beatAnalysis.duration > 0 ? beatAnalysis.duration : clip.duration;
+              const speed = clip.speed > 0 ? clip.speed : 1;
+              return clip.start + (mediaLen - clip.sourceStart) / speed;
+            }
+          }
+          return beatAnalysis?.duration;
+        })();
+
+        // New top track so baked frames sit above the source picture in export.
+        const trackId = await dispatch({ op: "addTrack" });
+        if (!trackId) {
+          throw new Error(t("toast.bakeTrackFailed"));
+        }
+
+        for (let i = 0; i < usedBeats.length; i++) {
+          const start = usedBeats[i]!;
+          const next =
+            i + 1 < usedBeats.length
+              ? usedBeats[i + 1]!
+              : endCap !== undefined
+                ? endCap
+                : start + 5;
+          const duration = Math.max(1 / 60, next - start);
+          const intensity = Math.max(
+            0.35,
+            beatPulseIntensity(start, timelineBeats, Math.min(0.2, duration * 0.4)),
+          );
+
+          if (kind === "visualizer") {
+            const palette = asciiPaletteById(asciiPaletteId);
+            renderMusicVisualizer(canvas, {
+              width,
+              height,
+              time: start,
+              intensity,
+              voice: 0,
+              preset: visualizerPreset,
+              layout: visualizerLayout,
+              foreground: palette.foreground,
+              accent: palette.accent,
+              colorMode: vizColorMode,
+              count: vizCount > 0 ? vizCount : undefined,
+            });
+          } else if (videoSource) {
+            const { media, clip } = videoSource;
+            let mediaTime = start;
+            if (clip) {
+              mediaTime = clip.sourceStart + (start - clip.start) * clip.speed;
+              mediaTime = Math.max(0, mediaTime);
+              if (media.duration && media.duration > 0) {
+                mediaTime = Math.min(mediaTime, Math.max(0, media.duration - 0.05));
+              }
+            } else if (media.duration && media.duration > 0) {
+              mediaTime = Math.min(start, Math.max(0, media.duration - 0.05));
+            }
+            const still = new Uint8Array(await extractStill(media.path, mediaTime));
+            const image = await loadImageFromBytes(still);
+            const gridSize = Math.max(6, Math.round(14 * (1 - intensity * 0.3)));
+            const palette = asciiPaletteById(asciiPaletteId);
+            processFrameToAscii(
+              image,
+              canvas,
+              {
+                symbolSetId,
+                gridSize,
+                brightness: Math.round(intensity * 20),
+                contrast: 10,
+                enableEdgeSlashes: true,
+                background: palette.background,
+                foreground: palette.foreground,
+                accent: palette.accent,
+                colorMode: asciiColorMode,
+                motion: asciiMotion,
+                time: start,
+              },
+              offscreen,
+            );
+          } else {
+            renderBeatSymbols(canvas, {
+              width,
+              height,
+              intensity,
+              symbolSetId,
+              seed: i + 1,
+            });
+          }
+
+          const bytes = await canvasToJpegBytes(canvas);
+          const key =
+            kind === "visualizer"
+              ? `viz-${visualizerPreset}-${visualizerLayout}-${vizColorMode}-${vizCount}-${i}-${start.toFixed(3).replace(".", "_")}.jpg`
+              : `ascii-${mode}-${symbolSetId}-${asciiColorMode}-${asciiPaletteId}-${asciiMotion}-${i}-${start.toFixed(3).replace(".", "_")}.jpg`;
+          const path = await writeCacheFile(session.path, key, bytes);
+          const mediaItem = newMediaFromSummary(await probeMedia(path));
+          const mediaId = await dispatch({ op: "addMedia", item: mediaItem });
+          if (!mediaId) continue;
+          placements.push({ mediaId, start, duration });
+        }
+
+        if (placements.length === 0) return 0;
+        const clipId = await dispatch({
+          op: "placeImageClips",
+          placements,
+          trackId,
+        });
+        if (!clipId) {
+          throw new Error(t("toast.bakePlaceFailed"));
+        }
+        setSelectedClipIds([clipId]);
+        lastBakeKeyRef.current = bakeKey;
+        return placements.length;
+      })();
+
+      bakeInflightRef.current = run;
+      try {
+        return await run;
+      } finally {
+        if (bakeInflightRef.current === run) bakeInflightRef.current = null;
+      }
+    },
+    [
+      timelineBeats,
+      beatsPerImage,
+      frame.width,
+      frame.height,
+      visualizerPreset,
+      visualizerLayout,
+      symbolSetId,
+      asciiPaletteId,
+      asciiColorMode,
+      asciiMotion,
+      vizColorMode,
+      vizCount,
+      beatAnalysis,
+      session.path,
+      dispatch,
+      resolveVideoForAscii,
+      t,
+    ],
+  );
+
+  const placeCodeSymbolsOnBeats = useCallback(() => {
+    if (timelineBeats.length === 0 || bakingSymbols || bakeInflightRef.current) return;
+    setBakingSymbols(true);
+    void (async () => {
+      try {
+        const count = await bakeOverlayToTimeline("ascii");
+        if (count > 0) {
+          setAsciiLivePreview(false);
+          pushToast(t("toast.asciiVideoPlaced", { count: String(count) }), false);
+        } else if (count === 0) {
+          pushToast(t("toast.bakeEmpty"), true);
+        }
+      } catch (cause) {
+        pushToast(String(cause), true);
+      } finally {
+        setBakingSymbols(false);
+      }
+    })();
+  }, [timelineBeats, bakingSymbols, bakeOverlayToTimeline, setAsciiLivePreview, pushToast, t]);
+
+  /** Bake music-visualizer frames onto the beat grid (particles / kaleidoscope…). */
+  const placeVisualizerOnBeats = useCallback(() => {
+    if (timelineBeats.length === 0 || bakingSymbols || bakeInflightRef.current) return;
+    setBakingSymbols(true);
+    void (async () => {
+      try {
+        const count = await bakeOverlayToTimeline("visualizer");
+        if (count > 0) {
+          setAsciiLivePreview(false);
+          pushToast(t("toast.visualizerPlaced", { count: String(count) }), false);
+        } else if (count === 0) {
+          pushToast(t("toast.bakeEmpty"), true);
+        }
+      } catch (cause) {
+        pushToast(String(cause), true);
+      } finally {
+        setBakingSymbols(false);
+      }
+    })();
+  }, [timelineBeats, bakingSymbols, bakeOverlayToTimeline, setAsciiLivePreview, pushToast, t]);
+
   /** The clip tools dropdown. Hidden for clips with nothing to offer. */
   const clipTools = useMemo<MenuOption[][]>(() => {
     const clip = selectedClipIds.length === 1 ? findClip(project, selectedClipIds[0]) : null;
@@ -591,6 +1035,12 @@ function Editor({
             if (clip && media) void autoCaption(clip, media);
           },
         },
+        {
+          label: analyzingBeats ? t("menu.file.analyzingBeats") : t("menu.clip.analyzeBeats"),
+          icon: "waveform" as const,
+          disabled: !hasSound || analyzingBeats,
+          onSelect: analyzeBeatsForSelection,
+        },
       ],
       [
         {
@@ -610,7 +1060,16 @@ function Editor({
         },
       ],
     ];
-  }, [project, selectedClipIds, transcribing, autoCaption, dispatch, t]);
+  }, [
+    project,
+    selectedClipIds,
+    transcribing,
+    autoCaption,
+    dispatch,
+    t,
+    analyzingBeats,
+    analyzeBeatsForSelection,
+  ]);
 
   // ── timelines ────────────────────────────────────────────────────────────
   const [timelineToDelete, setTimelineToDelete] = useState<TimelineMeta | null>(null);
@@ -758,6 +1217,112 @@ function Editor({
     void dispatch({ op: "splitClips", clipIds: targets, time: at });
   }, [selectedClipIds, dispatch]);
 
+  const duplicateSelected = useCallback(() => {
+    if (selectedClipIds.length === 0) return;
+    void dispatch({ op: "duplicateClips", clipIds: selectedClipIds }).then((clipId) => {
+      if (clipId) setSelectedClipIds([clipId]);
+    });
+  }, [selectedClipIds, dispatch]);
+
+  /**
+   * Fit / match picture size for the current clip selection.
+   * `match*` uses the first selected picture clip as the size reference.
+   */
+  const fitSelectedClips = useCallback(
+    (mode: "fitHeight" | "fitWidth" | "matchWidth" | "matchHeight") => {
+      const current = latest.current.project;
+      const frameSize = { width: frame.width, height: frame.height };
+      const pictureIds = selectedClipIds.filter((id) => {
+        const clip = findClip(current, id);
+        return clip && (clip.kind === "video" || clip.kind === "image");
+      });
+      if (pictureIds.length === 0) return;
+
+      let targetWidth = 0;
+      let targetHeight = 0;
+      if (mode === "matchWidth" || mode === "matchHeight") {
+        const ref = findClip(current, pictureIds[0]!);
+        const media = ref ? findMedia(current, ref.mediaId) : null;
+        if (!ref || !media?.width || !media.height) return;
+        const shown = displayedSize(
+          { width: media.width, height: media.height },
+          frameSize,
+          ref.scale,
+        );
+        if (!shown) return;
+        targetWidth = shown.fittedWidth;
+        targetHeight = shown.fittedHeight;
+      }
+
+      const commands = pictureIds.flatMap((id) => {
+        const clip = findClip(current, id);
+        const media = clip ? findMedia(current, clip.mediaId) : null;
+        if (!clip || !media?.width || !media.height) return [];
+        const size = { width: media.width, height: media.height };
+        let scale: number | null;
+        if (mode === "fitHeight") scale = scaleToFitHeight(size, frameSize);
+        else if (mode === "fitWidth") scale = scaleToFitWidth(size, frameSize);
+        else if (mode === "matchWidth") scale = scaleToMatchWidth(size, frameSize, targetWidth);
+        else scale = scaleToMatchHeight(size, frameSize, targetHeight);
+        if (scale === null) return [];
+        const patch = transformPatch({
+          scale: clampScale(scale),
+          offsetX: 0,
+          offsetY: 0,
+        });
+        return [
+          {
+            op: "setClipTransform" as const,
+            clipId: id,
+            ...patch,
+          },
+        ];
+      });
+
+      if (commands.length === 0) return;
+      void dispatch(
+        commands.length === 1 ? commands[0]! : { op: "batch", commands },
+      );
+    },
+    [selectedClipIds, frame.width, frame.height, dispatch],
+  );
+
+  /** CapCut-style freeze: still at the playhead, default 1s hold. */
+  const freezeFrameAtPlayhead = useCallback(() => {
+    const current = latest.current.project;
+    const at = latest.current.playhead;
+    const selected =
+      selectedClipIds.length === 1 ? findClip(current, selectedClipIds[0]) : null;
+    const clip =
+      selected && (selected.kind === "video" || selected.kind === "image")
+        ? selected
+        : clipsAt(current, at).find((item) => item.kind === "video" || item.kind === "image");
+    if (!clip) return;
+    const edge = 1 / 60;
+    if (at <= clip.start + edge || at >= clip.start + clip.duration - edge) return;
+
+    void (async () => {
+      let still = undefined as ReturnType<typeof newMediaFromSummary> | undefined;
+      if (clip.kind === "video") {
+        const media = findMedia(current, clip.mediaId);
+        if (!media) return;
+        const sourceTime = clip.sourceStart + (at - clip.start) * clip.speed;
+        const bytes = new Uint8Array(await extractStill(media.path, sourceTime));
+        const key = `freeze-${clip.id}-${sourceTime.toFixed(3).replace(".", "_")}.jpg`;
+        const path = await writeCacheFile(session.path, key, bytes);
+        still = newMediaFromSummary(await probeMedia(path));
+      }
+      const freezeId = await dispatch({
+        op: "freezeFrame",
+        clipId: clip.id,
+        time: at,
+        duration: 1,
+        still,
+      });
+      if (freezeId) setSelectedClipIds([freezeId]);
+    })();
+  }, [selectedClipIds, dispatch, session.path]);
+
   const mergeSelected = useCallback(() => {
     void dispatch({ op: "mergeClips", clipIds: selectedClipIds }).then((clipId) => {
       if (clipId) setSelectedClipIds([clipId]);
@@ -867,7 +1432,47 @@ function Editor({
   const openModifyProject = useCallback(() => setModifyingProject({ busy: false }), []);
   const openSettings = useCallback(() => setSettingsOpen(true), []);
   const openSpeech = useCallback(() => setSpeech({}), []);
-  const openExport = useCallback(() => setExporting(true), []);
+  /**
+   * Live overlay never reaches FFmpeg. If preview ASCII/visualizer is on,
+   * bake it to a top track first so the export matches what you saw.
+   */
+  const openExport = useCallback(() => {
+    void (async () => {
+      if (asciiLivePreview && timelineBeats.length > 0) {
+        setBakingSymbols(true);
+        try {
+          const kind = overlaySurface === "visualizer" ? "visualizer" : "ascii";
+          // Await in-flight Place bake if one is running.
+          const count = await bakeOverlayToTimeline(kind);
+          if (count === 0) {
+            pushToast(t("toast.bakeEmpty"), true);
+            return;
+          }
+          if (count > 0) {
+            setAsciiLivePreview(false);
+            pushToast(t("toast.overlayBakedForExport", { count: String(count) }), false);
+          }
+          // count === -1: already baked with same settings; open export as-is.
+        } catch (cause) {
+          pushToast(String(cause), true);
+          return;
+        } finally {
+          setBakingSymbols(false);
+        }
+      } else if (asciiLivePreview) {
+        pushToast(t("toast.liveOverlayNotInExport"), true);
+      }
+      setExporting(true);
+    })();
+  }, [
+    asciiLivePreview,
+    timelineBeats.length,
+    overlaySurface,
+    bakeOverlayToTimeline,
+    setAsciiLivePreview,
+    pushToast,
+    t,
+  ]);
 
   // ── keyboard ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -901,9 +1506,19 @@ function Editor({
             event.preventDefault();
             splitAtPlayhead();
             break;
+          case "KeyD":
+            event.preventDefault();
+            duplicateSelected();
+            break;
           case "KeyE":
             event.preventDefault();
             setExporting(true);
+            break;
+          case "KeyF":
+            if (event.shiftKey) {
+              event.preventDefault();
+              freezeFrameAtPlayhead();
+            }
             break;
           default:
             break;
@@ -943,7 +1558,7 @@ function Editor({
         case "KeyF": {
           // The same marker resolveDrop uses to find the timeline canvas -
           // its width is a layout fact only that element knows.
-          const canvas = document.querySelector<HTMLCanvasElement>("[data-wolfcut-timeline]");
+          const canvas = document.querySelector<HTMLCanvasElement>("[data-ctrlbeat-timeline]");
           if (canvas) fit(canvas.clientWidth);
           break;
         }
@@ -967,8 +1582,10 @@ function Editor({
   }, [
     deleteSelected,
     duration,
+    duplicateSelected,
     fit,
     frameRate,
+    freezeFrameAtPlayhead,
     mergeSelected,
     redoAction,
     saveAndNotify,
@@ -1083,6 +1700,8 @@ function Editor({
               disabled: selectedMediaIds.length === 0,
               onSelect: () => placeMediaSet(selectedMediaIds, latest.current.playhead, null),
             },
+          ],
+          [
             {
               label: t("menu.file.save"),
               icon: "folder",
@@ -1155,6 +1774,19 @@ function Editor({
               onSelect: splitAtPlayhead,
             },
             {
+              label: tp("menu.edit.duplicateClips", Math.max(1, selectedClipIds.length)),
+              icon: "copy",
+              hint: "Ctrl+D",
+              disabled: selectedClipIds.length === 0,
+              onSelect: duplicateSelected,
+            },
+            {
+              label: t("menu.edit.freezeFrame"),
+              icon: "image",
+              hint: "Ctrl+Shift+F",
+              onSelect: freezeFrameAtPlayhead,
+            },
+            {
               label: tp("menu.edit.deleteClips", Math.max(1, selectedClipIds.length)),
               icon: "trash",
               hint: "Del",
@@ -1200,6 +1832,8 @@ function Editor({
     [
       deleteSelected,
       duration,
+      duplicateSelected,
+      freezeFrameAtPlayhead,
       renderableClipCount,
       onCloseProject,
       openExport,
@@ -1334,6 +1968,22 @@ function Editor({
               onTogglePlay={transport.toggle}
               onStep={(frames) => transport.step(frames, frameRate)}
               onSeek={transport.seek}
+              asciiOverlay={{
+                enabled: asciiLivePreview,
+                symbolSetId,
+                beatTimes: timelineBeats,
+                mode: asciiDriveMode,
+                voiceLevel,
+                surface: overlaySurface,
+                visualizerPreset,
+                visualizerLayout,
+                asciiPaletteId,
+                asciiColorMode,
+                asciiMotion,
+                vizColorMode,
+                vizCount,
+                audioLevelAt,
+              }}
             />
           </div>
 
@@ -1363,6 +2013,55 @@ function Editor({
               onCommitClip={commitEcho}
               onSpeedChange={changeSpeed}
               onModifyProject={openModifyProject}
+              beats={{
+                beatCount: timelineBeats.length,
+                analyzingBeats,
+                bakingSymbols,
+                beatPresetId,
+                beatsPerImage,
+                loopImagesUntilEnd,
+                asciiLivePreview,
+                asciiDriveMode,
+                overlaySurface,
+                visualizerPreset,
+                visualizerLayout,
+                symbolSetId,
+                asciiColorMode,
+                asciiPaletteId,
+                asciiMotion,
+                vizColorMode,
+                vizCount,
+                beatOffsetMs,
+                beatBpm,
+                canAnalyze: resolveAudioForBeats() !== null,
+                canPlaceImages:
+                  timelineBeats.length > 0 &&
+                  selectedMediaIds.some((id) => {
+                    const media = findMedia(project, id);
+                    return media?.kind === "image" || media?.kind === "video";
+                  }),
+                canPlaceSymbols: timelineBeats.length > 0,
+                onAnalyze: analyzeBeatsForSelection,
+                onClearBeats: clearBeats,
+                onPlaceImages: placeSelectedImagesOnBeats,
+                onPlaceSymbols: placeCodeSymbolsOnBeats,
+                onPlaceVisualizer: placeVisualizerOnBeats,
+                onBeatPreset: setBeatPresetId,
+                onBeatsPerImage: setBeatsPerImage,
+                onLoopImages: setLoopImagesUntilEnd,
+                onAsciiLivePreview: setAsciiLivePreview,
+                onAsciiDriveMode: setAsciiDriveMode,
+                onOverlaySurface: setOverlaySurface,
+                onVisualizerPreset: setVisualizerPreset,
+                onVisualizerLayout: setVisualizerLayout,
+                onSymbolSet: setSymbolSetId,
+                onAsciiColorMode: setAsciiColorMode,
+                onAsciiPalette: setAsciiPaletteId,
+                onAsciiMotion: setAsciiMotion,
+                onVizColorMode: setVizColorMode,
+                onVizCount: setVizCount,
+                onBeatOffset: handleBeatOffset,
+              }}
             />
           </div>
         </div>
@@ -1386,15 +2085,21 @@ function Editor({
             secondsPerPixel={secondsPerPixel}
             scrollLeft={scrollLeft}
             trackScroll={trackScroll}
+            beatTimes={timelineBeats}
             assets={assets.current}
             theme={theme}
             onToolChange={setTool}
             onSnapChange={setSnap}
-            onScrub={transport.seek}
+            onScrub={scrubWithBeatSnap}
             onSelectClips={setSelectedClipIds}
             onMoveClips={(moves) => {
+              const threshold = latest.current.secondsPerPixel * 8;
               for (const move of moves) {
-                liveClip(move.clipId, { start: Math.max(0, move.start), trackId: move.trackId });
+                const start =
+                  snap && timelineBeats.length > 0
+                    ? snapToNearest(Math.max(0, move.start), timelineBeats, threshold)
+                    : Math.max(0, move.start);
+                liveClip(move.clipId, { start, trackId: move.trackId });
               }
             }}
             onTrimClip={(clipId, edge, delta) => {
@@ -1406,6 +2111,21 @@ function Editor({
             onMergeSelected={mergeSelected}
             mergeBlockedBecause={mergeBlockedBecause}
             onDeleteSelected={deleteSelected}
+            onMoveBeat={(index, time) => {
+              setTimelineBeats((current) => {
+                if (index < 0 || index >= current.length) return current;
+                const next = [...current];
+                next[index] = Math.max(0, time);
+                next.sort((a, b) => a - b);
+                return next;
+              });
+            }}
+            onRemoveBeat={(index) => {
+              setTimelineBeats((current) => current.filter((_, i) => i !== index));
+            }}
+            onAddBeat={(time) => {
+              setTimelineBeats((current) => [...current, Math.max(0, time)].sort((a, b) => a - b));
+            }}
             mediaDrag={mediaDrag ? { x: mediaDrag.x, y: mediaDrag.y } : null}
             onZoom={zoom}
             onScroll={setScrollLeft}
@@ -1479,6 +2199,14 @@ function Editor({
                               icon: "type" as const,
                               onSelect: () => void autoCaption(clip, media),
                             },
+                            {
+                              label: analyzingBeats
+                                ? t("menu.file.analyzingBeats")
+                                : t("menu.clip.analyzeBeats"),
+                              icon: "waveform" as const,
+                              disabled: analyzingBeats,
+                              onSelect: analyzeBeatsForSelection,
+                            },
                           ]
                         : [];
                     })(),
@@ -1529,6 +2257,24 @@ function Editor({
                   // Arranging.
                   [
                     {
+                      label: tp("contextMenu.duplicateClips", target.length),
+                      icon: "copy",
+                      hint: "Ctrl+D",
+                      onSelect: duplicateSelected,
+                    },
+                    ...(!many &&
+                    clip &&
+                    (clip.kind === "video" || clip.kind === "image")
+                      ? [
+                          {
+                            label: t("contextMenu.freezeFrame"),
+                            icon: "image" as const,
+                            hint: "Ctrl+Shift+F",
+                            onSelect: freezeFrameAtPlayhead,
+                          },
+                        ]
+                      : []),
+                    {
                       label: t("contextMenu.moveToPlayhead"),
                       icon: "select",
                       onSelect: () => {
@@ -1548,6 +2294,42 @@ function Editor({
                       },
                     },
                   ],
+                  // Size: fit to frame / match selection.
+                  ...(() => {
+                    const pictureCount = target.filter((id) => {
+                      const item = findClip(project, id);
+                      return item && (item.kind === "video" || item.kind === "image");
+                    }).length;
+                    if (pictureCount === 0) return [];
+                    return [
+                      [
+                        {
+                          label: t("contextMenu.fitToHeight"),
+                          icon: "image" as const,
+                          onSelect: () => fitSelectedClips("fitHeight"),
+                        },
+                        {
+                          label: t("contextMenu.fitToWidth"),
+                          icon: "image" as const,
+                          onSelect: () => fitSelectedClips("fitWidth"),
+                        },
+                        ...(pictureCount > 1
+                          ? [
+                              {
+                                label: t("contextMenu.matchWidth"),
+                                icon: "copy" as const,
+                                onSelect: () => fitSelectedClips("matchWidth"),
+                              },
+                              {
+                                label: t("contextMenu.matchHeight"),
+                                icon: "copy" as const,
+                                onSelect: () => fitSelectedClips("matchHeight"),
+                              },
+                            ]
+                          : []),
+                      ],
+                    ];
+                  })(),
                   // Destruction, kept in its own section at the bottom.
                   [
                     {

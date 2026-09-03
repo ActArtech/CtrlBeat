@@ -56,7 +56,7 @@ export function usePlaybackBridge({
     if (!isTauri()) return;
     const timer = window.setTimeout(() => {
       void audioSetClips(projectPath, audibleClips).catch((cause: unknown) =>
-        console.error("WolfCut: could not update the mix", cause),
+        console.error("CtrlBeat: could not update the mix", cause),
       );
     }, 150);
     return () => window.clearTimeout(timer);

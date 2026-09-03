@@ -10,6 +10,18 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 
 import { buildPreviewLook, type AppliedEffect, type CanvasOp } from "../lib/effects";
 import type { PreviewSource, TextOverlay } from "../lib/monitor";
+import type { SymbolSetId } from "../lib/codevice/symbolSets";
+import type { AsciiColorModeId, AsciiMotionId } from "../lib/codevice/asciiPalettes";
+import {
+  AsciiLiveOverlay,
+  type AsciiDriveMode,
+  type OverlaySurface,
+} from "./AsciiLiveOverlay";
+import type {
+  VisualizerLayoutId,
+  VisualizerPresetId,
+  VizColorModeId,
+} from "../lib/codevice/musicVisualizer";
 import { timecode } from "../lib/time";
 import { MAX_SCALE, MIN_SCALE } from "../lib/editor";
 import { useLocale, type MsgKey } from "../lib/i18n";
@@ -270,6 +282,7 @@ export function Preview({
   onTogglePlay,
   onStep,
   onSeek,
+  asciiOverlay = null,
 }: {
   source: PreviewSource | null;
   /** Text clips live at the playhead, bottom-most first. */
@@ -318,6 +331,23 @@ export function Preview({
   onTogglePlay: () => void;
   onStep: (frames: number) => void;
   onSeek: (seconds: number) => void;
+  /** Live codeviceanim ASCII overlay while scrubbing / playing. */
+  asciiOverlay?: {
+    enabled: boolean;
+    symbolSetId: SymbolSetId;
+    beatTimes: readonly number[];
+    mode: AsciiDriveMode;
+    voiceLevel?: number;
+    surface?: OverlaySurface;
+    visualizerPreset?: VisualizerPresetId;
+    visualizerLayout?: VisualizerLayoutId;
+    asciiPaletteId?: string;
+    asciiColorMode?: AsciiColorModeId;
+    asciiMotion?: AsciiMotionId;
+    vizColorMode?: VizColorModeId;
+    vizCount?: number;
+    audioLevelAt?: (time: number) => number;
+  } | null;
 }) {
   const { t } = useLocale();
   const video = useRef<HTMLVideoElement>(null);
@@ -599,6 +629,34 @@ export function Preview({
                   the approximation layers beneath; the veil and titles still
                   draw above, exactly as the exporter stacks them. */}
               {engineStill && <EngineStillLayer still={engineStill} />}
+
+              {/* Live ASCII / symbol overlay (codeviceanim engine + Concat beats).
+                  Covers the picture while enabled so scrubbing shows glyph art. */}
+              {asciiOverlay?.enabled && (
+                <AsciiLiveOverlay
+                  enabled
+                  playhead={playhead}
+                  beatTimes={asciiOverlay.beatTimes}
+                  symbolSetId={asciiOverlay.symbolSetId}
+                  mode={asciiOverlay.mode}
+                  voiceLevel={asciiOverlay.voiceLevel ?? 0}
+                  surface={asciiOverlay.surface ?? "ascii"}
+                  visualizerPreset={asciiOverlay.visualizerPreset ?? "particles"}
+                  visualizerLayout={asciiOverlay.visualizerLayout ?? "center"}
+                  asciiPaletteId={asciiOverlay.asciiPaletteId ?? "deepSea"}
+                  asciiColorMode={asciiOverlay.asciiColorMode ?? "mono"}
+                  asciiMotion={asciiOverlay.asciiMotion ?? "none"}
+                  vizColorMode={asciiOverlay.vizColorMode ?? "mono"}
+                  vizCount={asciiOverlay.vizCount ?? 0}
+                  audioLevelAt={asciiOverlay.audioLevelAt}
+                  width={Math.max(2, Math.round(frameRect.width))}
+                  height={Math.max(2, Math.round(frameRect.height))}
+                  getSource={() => {
+                    if (!source) return null;
+                    return source.isStill ? still.current : video.current;
+                  }}
+                />
+              )}
 
               {/* A fade-to-black/white transition washing over the cut. Above
                   the picture, below titles - titles ride through a fade the

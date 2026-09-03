@@ -426,6 +426,30 @@ export async function writeCacheFile(
   return `${project}/cache/${key}`;
 }
 
+/**
+ * One JPEG still from a media file at `time` seconds of source.
+ *
+ * Freeze-frame writes this into the project cache, probes it, then dispatches
+ * `freezeFrame` with the probed still.
+ */
+export async function extractStill(path: string, time: number): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>("extract_still", { path, time });
+}
+
+/**
+ * Mono little-endian f32 PCM for offline beat detection.
+ *
+ * Default rate is 22050 Hz. The UI turns the buffer into a Float32Array and
+ * runs `detectBeatsFromPcm`.
+ */
+export async function decodeAudioPcm(
+  path: string,
+  sampleRate = 22050,
+): Promise<{ sampleRate: number; samples: Float32Array }> {
+  const bytes = await invoke<ArrayBuffer>("decode_audio_pcm", { path, sampleRate });
+  return { sampleRate, samples: new Float32Array(bytes) };
+}
+
 /** Subscribes to export progress. Resolves to an unsubscribe function. */
 export async function onExportProgress(
   handler: (progress: ExportProgress) => void,

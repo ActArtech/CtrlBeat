@@ -17,8 +17,11 @@ const one = (id: string, params: Record<string, number> = {}) =>
   buildEffectChain([{ id, params }]);
 
 /** The definition's sliders, all pushed to one bound. */
-const bound = (id: string, which: "min" | "max"): Record<string, number> =>
-  Object.fromEntries(findEffect(id)!.params.map((param) => [param.key, param[which]]));
+const bound = (id: string, which: "min" | "max"): Record<string, number> => {
+  const effect = findEffect(id);
+  if (!effect) throw new Error(`unknown effect: ${id}`);
+  return Object.fromEntries(effect.params.map((param) => [param.key, param[which]]));
+};
 
 const DEFAULT_CHAINS: Record<string, string> = {
   "black-white": "hue=s=0",

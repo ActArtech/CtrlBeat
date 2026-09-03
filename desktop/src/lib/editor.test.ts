@@ -11,6 +11,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  detachedAudioOf,
   snapTime,
   speedPatch,
   transformPatch,
@@ -63,6 +64,17 @@ function project(clips: Clip[]): EditorProject {
 }
 
 const MIN_CLIP_DURATION = 1 / 60;
+
+describe("detachedAudioOf", () => {
+  test("returns only clips linked to the source video", () => {
+    const detached = clip({ id: "sound", kind: "audio", detachedFrom: "video" });
+    const unrelated = clip({ id: "other", kind: "audio", detachedFrom: "another-video" });
+
+    expect(detachedAudioOf(project([clip({ id: "video" }), detached, unrelated]), "video")).toEqual([
+      detached,
+    ]);
+  });
+});
 
 describe("trimPatch mirrors TrimClip", () => {
   test("an end trim grows and shrinks with the duration floor", () => {
