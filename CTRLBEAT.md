@@ -55,6 +55,15 @@ Projects default to `Desktop/CtrlBeat`.
 CtrlBeat is **Windows desktop** today. Upstream Concat lists Android/iOS as
 work in progress. For phones, use CapCut, kneecap, or LibreCuts.
 
+## License
+
+**MPL-2.0** as shipped (`LICENSE`). Path map and upstream cutoff: `NOTICE`.
+Credit: `ATTRIBUTION.md`.
+
+Pin: do **not** merge Concat from `v0.2.0-alpha.19` / AGPL onward unless you
+deliberately switch this product to AGPL-3.0-or-later. MIT is not available for
+the whole editor fork.
+
 ## Dev
 
 From `desktop/` (VS Developer shell on Windows):

@@ -104,7 +104,16 @@ CtrlBeat is **Windows desktop** today. For phones, use CapCut, kneecap, or Libre
 
 ## License
 
-Covered sources in this tree: see [LICENSE](LICENSE) (MPL-2.0 as shipped here)
-and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Upstream Concat may use
-additional terms on their own releases. Keep Concat / WolfCut credit when you
-redistribute.
+**MPL-2.0** for this tree as shipped. See [LICENSE](LICENSE), path map in
+[NOTICE](NOTICE), credit in [ATTRIBUTION.md](ATTRIBUTION.md), and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+**Do not treat this repo as MIT.** CtrlBeat inherits the Concat / WolfCut
+engine and desktop shell. Only the copyright holders can relicense that code.
+Concat moved to AGPL-3.0-or-later at `v0.2.0-alpha.19` (`c30b245`); that change
+is not retroactive. This fork's merge-base with upstream `main` is still
+pre-AGPL (`8938ec3`). Do not merge AGPL-era Concat into this tree without
+intentionally moving CtrlBeat to AGPL.
+
+End users editing videos on their own machine have no extra paperwork.
+Obligations apply to forks, redistribution, embedding, and hosting.
