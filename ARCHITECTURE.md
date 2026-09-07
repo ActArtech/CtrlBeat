@@ -15,7 +15,7 @@ flowchart LR
         HOOKS["useEngineSession<br/>useEngineTruth<br/>usePlaybackBridge"]
     end
     subgraph HOST["desktop/src-tauri — Tauri host"]
-        CMD["39 #[tauri::command]<br/>editor_api · playback · transcribe · templates"]
+        CMD["43 #[tauri::command]<br/>editor_api · playback · bake · transcribe · templates"]
         SESSION["Session<br/>(one Mutex&lt;Option&lt;Session&gt;&gt;)"]
     end
     subgraph ENGINE["engine/crates — the product"]
@@ -152,13 +152,14 @@ Hybrid pipeline in `wolfcut-export`:
 
 ---
 
-## 5. IPC surface (39 commands)
+## 5. IPC surface (43 commands)
 
 | Group | Commands |
 |---|---|
 | Editor session | `editor_open/apply/undo/redo/save/state/close` |
 | Projects & recents | `create_project`, `open_project`, `recent_projects`, `forget_project`, `project_preview` |
 | Media | `probe_media`, `read_media_bytes` (capped), `extract_peaks`, `extract_filmstrip`, `read_artwork`, `write_artwork` |
+| Overlay bake | `bake_begin`, `bake_frame` (raw JPEG body in, streaming encode), `bake_finish`, `bake_abort` |
 | Preview & transport | `preview_frame`, `preview_prefetch`, `transport_play/pause/seek`, `audio_set_clips` |
 | Export | `export_project`, `cancel_export` |
 | Templates | 5 commands |

@@ -31,9 +31,20 @@ It is **not** an official Concat release. See [ATTRIBUTION.md](ATTRIBUTION.md).
 
 - Beat detection with timeline marks (Balanced / Bass / Piano / Dense)
 - Place images **and** videos on beats (loop, beats-per-clip, gap-only duration)
+- **Lyrics on beats** — paste lyrics, group words per beat (karaoke-style), land as text clips
 - Music visualizer presets (particles, radial, kaleidoscope, Lissajous, orbit)
 - ASCII / code-symbol overlays (13 glyph sets) with live preview
-- Bake overlays to a top track so export includes them
+- **Bake with a config sheet** — pick smoothness, see the frame/time estimate,
+  watch progress, cancel; the overlay bakes as **one animated clip** (not one
+  still per beat) and re-baking replaces instead of stacking
+- **Full transition suite** — cross-fade, fade to black/white, wipes, push,
+  zoom — all real in preview *and* export, with **apply to selection / every
+  cut** one-undo sweeps
+- **Unified fades** — Fade in / Fade out ramp sound *and* picture together,
+  on clips, stills and titles
+- **Word-level auto captions** — whisper token timing, karaoke-style
+  (Settings → Transcriber → Word by word), phrase mode as before
+- **Titles take transitions and fades** like any visual, end to end
 - Freeze frame, duplicate clips, fit/match sizing, video source-start window
 - Beats tools live in the **Beats** panel (not dumped in File)
 

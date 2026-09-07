@@ -5,8 +5,8 @@ Product name: **CtrlBeat**. See [CTRLBEAT.md](CTRLBEAT.md) and [ATTRIBUTION.md](
 Custom desktop build of [jub0t/Concat](https://github.com/jub0t/Concat).  
 This document covers what we added on top of upstream, how to install the build, and what is *not* ready yet (mobile).
 
-**Date:** 2026-09-03  
-**App version in installer:** CtrlBeat 0.3.1  
+**Date:** 2026-09-07  
+**App version in installer:** CtrlBeat 0.3.1 (features below are post-0.3.1 source)  
 **Base:** Concat / WolfCut (Tauri + React + Rust engine)  
 **Bundle id:** `app.ctrlbeat.desktop`
 
@@ -34,7 +34,13 @@ Do **not** hand people the full source tree or ask them to `git clone` unless th
 | **Beat slideshow** | Images *and* videos on the beat grid, loop until song end, beats-per-clip |
 | **Music visualizer** | Live + bakeable particle / radial / kaleidoscope / Lissajous / orbit overlays |
 | **ASCII / code symbols** | 13 symbol sets, live preview, voice/hybrid/video modes, bake to timeline |
-| **Export bake** | Live overlay is preview-only; export (or Place on beats) bakes frames onto a top track |
+| **Bake with a config sheet** | Smoothness choice, live frame/time estimate, progress + cancel; one **animated** clip per bake; re-bake replaces instead of stacking; identical re-bakes are skipped across relaunches |
+| **Lyrics on beats** | Paste lyrics, group words per beat (1–4 per beat, beat step), land as caption-styled text clips on a "Lyrics" lane, one undo step |
+| **Full transition suite** | All seven catalogue transitions are real in preview *and* export (wipes/push/zoom lowered in the engine as motion ramps) |
+| **Transition sweeps** | Apply to **selection** or **every cut** from each transition tile - one batch, one undo step |
+| **Unified fades** | Fade in / Fade out ramp sound *and* picture together - clips, stills, titles; dissolves never shorten a deliberate fade |
+| **Word-level captions** | Whisper token timing surfaced through the pipeline; Settings → Transcriber → Word by word, with graceful phrase fallback |
+| **Title transitions + fades** | Text clips take every transition and fades end to end (live preview draws the arriving title; the export passes them onto the rasterised PNG) |
 | **Clip fit / match** | Fit to frame width/height; match width/height for multi-select |
 | **Freeze + duplicate** | CapCut-style freeze at playhead; duplicate selected clips |
 | **Video source window** | Per-clip source in-point slider so a short beat gap shows the right part of a long clip |
@@ -109,12 +115,28 @@ Important product rule:
 > Live ASCII / visualizer overlay is **preview-only**.  
 > It is **not** in the MP4 until frames are baked to a timeline track.
 
-Ways to get overlays into the file:
+**How the bake works now (post-0.3.1):** "Place visualizer / code symbols on
+beats" (and the automatic pre-export bake) opens a **bake sheet** first —
+what will bake, the span, a smoothness choice (12/24/30 fps; ASCII-on-video
+samples the source once per frame so it runs at 12), and a live
+"frames · time" estimate. Nothing encodes until **Bake** is pressed. While it
+runs: frame progress with a time-left estimate and **Cancel** (returns to the
+config, choices preserved).
 
-- Use **Place visualizer** / **Place code symbols on beats**, or  
-- Export while live overlay is enabled (app bakes using the beat grid / fingerprint lock path).
+The bake itself re-renders the overlay at full frame rate over the beat span
+(the same draws the live overlay performs, same pulse math) and streams the
+frames to the host, which encodes them into **one MP4** landing on the
+timeline as **one clip** — not one frozen still per beat. That fixed the old
+behaviour where the export was a ~2 fps slideshow of frozen frames while the
+preview had shown 20 fps motion, and a 3-minute song cost hundreds of files /
+media items / clips / undo entries.
 
-If you export with live overlay on and no beats analyzed, the UI warns that bake needs beats.
+- Re-baking with **Replace previous bake** on (default) removes the old clip,
+  track and media first — experimenting no longer stacks lanes.
+- An identical re-bake (same settings + beats, remembered across relaunches)
+  is skipped; export continues with the clip already on the timeline.
+- Export with the live overlay on opens the same sheet — every bake is
+  explicitly agreed; Cancel returns to the editor without exporting.
 
 ### 6. Timeline editing extras
 
@@ -125,6 +147,29 @@ If you export with live overlay on and no beats analyzed, the UI warns that bake
 ### 7. UX / panel layout
 
 Beat detection, placement, visualizer, and ASCII controls were moved out of a crowded **File** menu into the dedicated **Beats** right-panel tab. File stays for project / import / export style actions.
+
+### 8. September 2026 wave (post-0.3.1 source)
+
+- **Transitions are all real.** Wipe Left / Right, Push and Zoom existed in
+  the catalogue but clicked to nothing; they are now lowered in the engine
+  (`wolfcut-core` motion ramps folded into the render plan) exactly like the
+  dissolve always was. Export, the paused monitor's true frame and live
+  playback all draw the same geometry.
+- **Apply to selected / every cut.** Each transition tile carries **Sel** and
+  **All** chips; both land as one batch - one undo step - and toast the count.
+- **One fade fades everything.** The Adjust panel's Fade in / Fade out were
+  sound-only and hidden for stills; they now ramp the picture too, everywhere
+  (export, paused monitor, live playback), and titles get the same fades.
+- **Lyrics on beats.** New sheet in the Beats panel: paste words, pick words
+  per beat and the beat step, see the exact plan ("42 words → 21 clips"),
+  place onto a "Lyrics" lane.
+- **Word-by-word auto captions.** whisper's token timestamps are surfaced
+  through `transcribe.rs` (full-JSON output with a plain rerun fallback for
+  old binaries); Settings → Transcriber picks the caption style.
+- **Titles take transitions + fades.** Guards, preview helpers and the
+  export's rasterised-title path all passed text through as a second-class
+  citizen; now a title dissolves, wipes, pushes, zooms and fades like any
+  visual.
 
 ---
 
@@ -179,6 +224,14 @@ The copy under `Concat/releases/` is the shareable set.
 | `desktop/src/lib/codevice/videoAsciiEngine.ts` | Frame → ASCII |
 | `desktop/src/lib/codevice/asciiPalettes.ts` | Palettes / color / motion |
 | `desktop/src/components/AdjustPanel.tsx` | Source-start slider for videos |
+| `desktop/src/lib/codevice/bakeOverlay.ts` | Bake planner: span, fps budget, frame times |
+| `desktop/src/hooks/useBakeOverlay.ts` | Bake orchestration: progress, cancel, replace |
+| `desktop/src/components/BakeDialog.tsx` | The configure-agree bake sheet |
+| `desktop/src-tauri/src/bake.rs` | Streaming bake encoder (JPEG pipe → one MP4) |
+| `desktop/src/lib/lyrics.ts` | `planLyricsOnBeats` planner |
+| `desktop/src/components/LyricsDialog.tsx` | Lyrics-on-beats sheet |
+| `engine/crates/wolfcut-core/src/timeline.rs` | Motion ramps (wipe / push / zoom lowering) |
+| `desktop/src-tauri/src/transcribe.rs` | whisper-cli run + word-timestamp parsing |
 | `desktop/src/App.tsx` | Placement, freeze, fit, bake wiring |
 | `desktop/src/locales/en.json` | English strings for new UI |
 | Engine / host | `source_start`, place-image clips, classify stills |
