@@ -78,11 +78,15 @@ fn media_clip(path: &Path, kind: &str, start: f64, duration: f64, track: usize) 
         video_filter_chain: String::new(),
         transition: None,
         video_fade_in: 0.0,
+        video_fade_out: 0.0,
         media_width: Some(320),
         media_height: Some(180),
         // Deliberately absent: this suite exists to exercise the probe
         // fallback and the graph-membership rules against real files.
         has_audio: None,
+        // Transition geometry is minted by resolution, never constructed.
+        motion_in: None,
+        motion_out: None,
     }
 }
 

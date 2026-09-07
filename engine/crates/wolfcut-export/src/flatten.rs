@@ -77,10 +77,19 @@ pub fn flatten_timeline(project: &Project, timeline_id: Option<&str>) -> Vec<Exp
                     kind: transition.id.clone(),
                     duration: transition.duration,
                 }),
-                video_fade_in: 0.0,
+                // One fade fades everything: the same values the audio path
+                // takes become the picture's opacity ramps, so a clip fades
+                // in and out as one thing - sound and picture together.
+                // Clamped defensively; the Adjust panel already holds fades
+                // to half the clip.
+                video_fade_in: clip.fade_in.max(0.0).min(clip.duration),
+                video_fade_out: clip.fade_out.max(0.0).min(clip.duration),
                 media_width: media.width,
                 media_height: media.height,
                 has_audio: Some(media.has_audio),
+                // Geometry is minted by `resolve_transitions`, never imported.
+                motion_in: None,
+                motion_out: None,
             })
         })
         .collect()
@@ -156,6 +165,29 @@ mod tests {
         assert_eq!(clip.has_audio, Some(true));
         assert_eq!(clip.filter_chain, "");
         assert_eq!(clip.video_filter_chain, "");
+    }
+
+    #[test]
+    fn one_fade_fades_picture_and_sound() {
+        let (mut editor, _, clip_id) = project_with_clip();
+        editor
+            .apply(Command::UpdateClip {
+                clip_id,
+                patch: ClipPatch {
+                    fade_in: Some(1.5),
+                    fade_out: Some(0.5),
+                    ..Default::default()
+                },
+            })
+            .expect("applies fades");
+        let flat = flatten_timeline(editor.project(), None);
+
+        // The audio path reads fade_in/fade_out unchanged; the same values
+        // become the picture's opacity ramps, so the clip fades as one thing.
+        assert_eq!(flat[0].fade_in, 1.5);
+        assert_eq!(flat[0].fade_out, 0.5);
+        assert_eq!(flat[0].video_fade_in, 1.5);
+        assert_eq!(flat[0].video_fade_out, 0.5);
     }
 
     #[test]

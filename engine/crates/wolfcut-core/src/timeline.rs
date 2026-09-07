@@ -78,8 +78,47 @@ pub struct Clip {
     /// Ramp the opacity back to zero over this many seconds into the clip's
     /// end. Zero means no ramp.
     pub video_fade_out: Rational,
+    /// Animated geometry over the clip's first seconds: a transition's slide
+    /// or zoom punch coming in. `None` - the common case - draws statically.
+    ///
+    /// The video-side sibling of a fade-in: like `video_fade_in`, it is what
+    /// overlap transitions are lowered into, and it rides the clip so every
+    /// renderer derives the same per-frame placement from one definition.
+    pub motion_in: Option<MotionRamp>,
+    /// Animated geometry over the clip's final seconds: a push's exit slide.
+    pub motion_out: Option<MotionRamp>,
     /// How the picture sits in the frame. Identity is fitted and centred.
     pub transform: Transform,
+}
+
+/// One animated-geometry ramp: how a clip's picture enters or exits.
+///
+/// A slide carries a signed direction in frame-width fractions (positive
+/// slides in from the right edge); a scale punch carries the factor the ramp
+/// starts from and settles to one.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Motion {
+    /// Enters from the right (`side` positive) or left, travelling that many
+    /// frame widths to reach rest.
+    Slide {
+        /// Frame widths of travel, signed: +1 slides in from the right edge.
+        side: f64,
+    },
+    /// Scales in from `factor` down to 1.0 - a zoom punch.
+    Scale {
+        /// The multiplier the ramp starts from.
+        factor: f64,
+    },
+}
+
+/// A [`Motion`] and how long it takes.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct MotionRamp {
+    /// What the ramp does.
+    pub motion: Motion,
+    /// Seconds from the clip's start (for `motion_in`) or to its end (for
+    /// `motion_out`) the ramp spans.
+    pub duration: Rational,
 }
 
 /// A clip's placement in the output frame.
@@ -129,6 +168,8 @@ impl Clip {
             opacity: 1.0,
             video_fade_in: Rational::ZERO,
             video_fade_out: Rational::ZERO,
+            motion_in: None,
+            motion_out: None,
             transform: Transform::IDENTITY,
         }
     }
@@ -151,6 +192,35 @@ impl Clip {
             factor *= (remaining / self.video_fade_out).as_f64().clamp(0.0, 1.0) as f32;
         }
         factor
+    }
+
+    /// The geometry this clip's motion ramps add at `time`: a horizontal
+    /// offset in frame-width fractions and a scale multiplier.
+    ///
+    /// Identity `(0.0, 1.0)` outside both ramps and for a clip with none -
+    /// the common case costs two `Option` checks. Like `video_fade_factor`,
+    /// the one definition every renderer agrees with.
+    pub fn motion_at(&self, time: Rational) -> (f64, f64) {
+        let mut offset_x = 0.0f64;
+        let mut scale = 1.0f64;
+        let local = time - self.start;
+
+        if let Some(ramp) = &self.motion_in {
+            let progress = ramp_progress(local, ramp.duration);
+            match ramp.motion {
+                Motion::Slide { side } => offset_x += side * (1.0 - progress),
+                Motion::Scale { factor } => scale *= 1.0 + (factor - 1.0) * (1.0 - progress),
+            }
+        }
+        let remaining = self.duration - local;
+        if let Some(ramp) = &self.motion_out {
+            let progress = ramp_progress(ramp.duration - remaining, ramp.duration);
+            match ramp.motion {
+                Motion::Slide { side } => offset_x += side * progress,
+                Motion::Scale { factor } => scale *= 1.0 + (factor - 1.0) * progress,
+            }
+        }
+        (offset_x, scale)
     }
 
     /// The span of timeline this clip occupies.
@@ -348,6 +418,15 @@ impl Project {
     }
 }
 
+/// How far through a ramp `elapsed` of its `duration` is, clamped to 0..=1.
+/// A zero-length ramp is done, not divide-by-zero.
+fn ramp_progress(elapsed: Rational, duration: Rational) -> f64 {
+    if duration.is_zero() {
+        return 1.0;
+    }
+    (elapsed / duration).as_f64().clamp(0.0, 1.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,6 +508,75 @@ mod tests {
         let clip = timeline.clip(id).expect("clip exists");
         assert_eq!(clip.video_fade_factor(seconds(2)), 1.0);
         assert_eq!(clip.video_fade_factor(seconds(4)), 1.0);
+    }
+
+    #[test]
+    fn a_slide_in_settles_from_off_frame() {
+        let (mut timeline, _, id) = fixture(); // covers timeline [2, 5)
+        {
+            let clip = timeline.clip_mut(id).expect("clip exists");
+            clip.motion_in = Some(MotionRamp {
+                motion: Motion::Slide { side: 1.0 },
+                duration: Rational::ONE,
+            });
+        }
+        let clip = timeline.clip(id).expect("clip exists");
+
+        let (start, scale) = clip.motion_at(seconds(2));
+        assert!((start - 1.0).abs() < 1e-9, "one frame-width off at first");
+        assert_eq!(scale, 1.0, "a slide does not zoom");
+        let (half, _) = clip.motion_at(Rational::new(5, 2));
+        assert!((half - 0.5).abs() < 1e-9, "halfway travelled");
+        let (rest, _) = clip.motion_at(seconds(3));
+        assert_eq!(rest, 0.0, "at rest once the ramp is done");
+    }
+
+    #[test]
+    fn a_slide_out_leaves_the_frame() {
+        let (mut timeline, _, id) = fixture(); // covers timeline [2, 5)
+        {
+            let clip = timeline.clip_mut(id).expect("clip exists");
+            clip.motion_out = Some(MotionRamp {
+                motion: Motion::Slide { side: -1.0 },
+                duration: Rational::ONE,
+            });
+        }
+        let clip = timeline.clip(id).expect("clip exists");
+
+        assert_eq!(clip.motion_at(seconds(3)).0, 0.0, "untouched until the exit");
+        let (half, _) = clip.motion_at(Rational::new(9, 2));
+        assert!((half + 0.5).abs() < 1e-9, "halfway out to the left");
+        let (edge, _) = clip.motion_at(seconds(5));
+        assert!((edge + 1.0).abs() < 1e-9, "a full width out at the end");
+    }
+
+    #[test]
+    fn a_scale_punch_settles_to_one() {
+        let (mut timeline, _, id) = fixture();
+        {
+            let clip = timeline.clip_mut(id).expect("clip exists");
+            clip.motion_in = Some(MotionRamp {
+                motion: Motion::Scale { factor: 1.25 },
+                duration: Rational::ONE,
+            });
+        }
+        let clip = timeline.clip(id).expect("clip exists");
+
+        let (offset, start) = clip.motion_at(seconds(2));
+        assert_eq!(offset, 0.0);
+        assert!((start - 1.25).abs() < 1e-9, "starts at the punch factor");
+        let (_, half) = clip.motion_at(Rational::new(5, 2));
+        assert!((half - 1.125).abs() < 1e-9, "eases toward one");
+        let (_, rest) = clip.motion_at(seconds(3));
+        assert_eq!(rest, 1.0);
+    }
+
+    #[test]
+    fn no_motion_is_identity_anywhere() {
+        let (timeline, _, id) = fixture();
+        let clip = timeline.clip(id).expect("clip exists");
+        assert_eq!(clip.motion_at(seconds(2)), (0.0, 1.0));
+        assert_eq!(clip.motion_at(seconds(4)), (0.0, 1.0));
     }
 
     #[test]

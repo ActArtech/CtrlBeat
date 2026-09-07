@@ -8,6 +8,7 @@
 
 // Public so the integration tests can drive a real export; see tests/.
 pub mod export;
+mod bake;
 mod editor_api;
 mod jobs;
 mod playback;
@@ -295,7 +296,7 @@ fn plausible_peaks(bytes: &[u8]) -> bool {
 /// vanishes with it. The key is confined to a single flat filename - anything
 /// that could walk out of the folder is refused rather than sanitised,
 /// because the only caller is our own frontend and a strange key is a bug.
-fn artwork_file(project: &str, key: &str) -> Result<std::path::PathBuf, String> {
+pub(crate) fn artwork_file(project: &str, key: &str) -> Result<std::path::PathBuf, String> {
     if key.is_empty()
         || !key
             .chars()
@@ -953,6 +954,7 @@ pub fn run() {
             )));
             app.manage(tts::TtsState::new());
             app.manage(editor_api::EditorState(std::sync::Mutex::new(None)));
+            app.manage(bake::BakeState(std::sync::Mutex::new(None)));
             app.manage(PoolState(std::sync::Arc::new(std::sync::Mutex::new(
                 wolfcut_media::ReaderPool::with_defaults(),
             ))));
@@ -974,6 +976,10 @@ pub fn run() {
             decode_audio_pcm,
             read_artwork,
             write_artwork,
+            bake::bake_begin,
+            bake::bake_frame,
+            bake::bake_finish,
+            bake::bake_abort,
             create_project,
             open_project,
             project_preview,

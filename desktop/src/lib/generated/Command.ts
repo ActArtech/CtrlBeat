@@ -124,8 +124,8 @@ clipId: string,
  */
 time: number, 
 /**
- * Editorial length of the hold. Floored at the engine minimum; when
- * absent or non-positive, uses a one-second default.
+ * Editorial length of the hold. Floored at [`MIN_CLIP_DURATION`];
+ * when absent or non-positive, uses [`DEFAULT_FREEZE_DURATION`].
  */
 duration?: number, 
 /**
@@ -140,7 +140,7 @@ placements: Array<ImagePlacement>,
 /**
  * Destination lane. None picks first free for the full span.
  */
-trackId?: string | null, } | { "op": "mergeClips", 
+trackId?: string, } | { "op": "mergeClips", 
 /**
  * The pieces to rejoin, any order.
  */
@@ -201,7 +201,15 @@ clipId: string,
 /**
  * New media in-point in seconds, floored at 0.
  */
-sourceStart: number, } | { "op": "addTrack" } | { "op": "removeTrack", 
+sourceStart: number, } | { "op": "addTrack" } | { "op": "reorderTracks", 
+/**
+ * The lane to move.
+ */
+trackId: string, 
+/**
+ * Its destination index, clamped to the last lane.
+ */
+toIndex: number, } | { "op": "removeTrack", 
 /**
  * The lane to delete.
  */

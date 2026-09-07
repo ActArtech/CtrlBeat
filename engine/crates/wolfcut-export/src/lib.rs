@@ -29,7 +29,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde::Deserialize;
 use wolfcut_core::frame::Frame;
 use wolfcut_core::time::{FrameRate, Rational};
-use wolfcut_core::timeline::{Clip, ClipId, MediaRef, Timeline, Track, TrackKind, Transform};
+use wolfcut_core::timeline::{
+    Clip, ClipId, MediaRef, Motion, MotionRamp, Timeline, Track, TrackKind, Transform,
+};
 use wolfcut_media::audio::{self, AudioClip};
 use wolfcut_media::{
     DecodeOptions, EncodeOptions, FfmpegDecoder, FfmpegEncoder, FrameSink, FrameSource,
@@ -124,11 +126,17 @@ pub struct ExportClip {
     #[cfg_attr(feature = "types", ts(optional = nullable))]
     #[serde(default)]
     pub transition: Option<TransitionSpec>,
-    /// Video opacity ramp up from the clip's start, in seconds. Set by
-    /// transition resolution below, never by the UI directly.
+    /// Video opacity ramp up from the clip's start, in seconds. The user's
+    /// fade-in arrives here via `flatten` (one fade fades picture and sound);
+    /// transition resolution may stretch it over a dissolve's pre-roll.
     #[cfg_attr(feature = "types", ts(as = "Option<f64>", optional))]
     #[serde(default)]
     pub video_fade_in: f64,
+    /// Video opacity ramp back down into the clip's end, in seconds. The
+    /// user's fade-out, exactly the fade-in mirrored.
+    #[cfg_attr(feature = "types", ts(as = "Option<f64>", optional))]
+    #[serde(default)]
+    pub video_fade_out: f64,
     /// The source's pixel width, when the UI knows it. What makes an
     /// aspect-correct decode possible - absent, the frame is filled edge to
     /// edge the way it always was.
@@ -145,6 +153,45 @@ pub struct ExportClip {
     #[cfg_attr(feature = "types", ts(optional = nullable))]
     #[serde(default)]
     pub has_audio: Option<bool>,
+    /// Animated geometry over the clip's first seconds, minted by transition
+    /// resolution below - never by the wire. A slide or a zoom punch in.
+    #[serde(skip)]
+    #[cfg_attr(feature = "types", ts(skip))]
+    pub motion_in: Option<MotionSpec>,
+    /// Animated geometry over the clip's final seconds: a push's exit slide.
+    #[serde(skip)]
+    #[cfg_attr(feature = "types", ts(skip))]
+    pub motion_out: Option<MotionSpec>,
+}
+
+/// How one clip's picture animates in or out, as the transition resolver
+/// expresses it.
+///
+/// `side` slides the picture by that many frame widths - positive enters
+/// from the right edge, negative from the left - settling at rest; a
+/// `factor` other than one scales from it down to one instead (a zoom
+/// punch). `duration` spans the ramp, from the clip's start for an
+/// entrance, into its end for an exit.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct MotionSpec {
+    /// Frame widths of travel; 0 with a non-unity `factor` means a punch.
+    pub side: f64,
+    /// Scale the ramp starts from; 1 for slides.
+    pub factor: f64,
+    /// Seconds the ramp covers.
+    pub duration: f64,
+}
+
+impl MotionSpec {
+    /// The core-crate ramp this spec lowers into.
+    fn to_ramp(self, rate: FrameRate) -> MotionRamp {
+        let motion = if self.factor != 1.0 {
+            Motion::Scale { factor: self.factor }
+        } else {
+            Motion::Slide { side: self.side }
+        };
+        MotionRamp { motion, duration: quantise(self.duration, rate) }
+    }
 }
 
 /// A transition on the cut into a clip.
@@ -153,7 +200,12 @@ pub struct ExportClip {
 #[cfg_attr(feature = "types", ts(export, export_to = "export/"))]
 #[serde(rename_all = "camelCase")]
 pub struct TransitionSpec {
-    /// "cross-fade", "fade-black" or "fade-white". Anything else is ignored.
+    /// "cross-fade", "fade-black", "fade-white", "wipe-left", "wipe-right",
+    /// "push" or "zoom". A wipe slides the incoming picture in from the edge
+    /// the name says the wipe travels toward; a push slides it in from the
+    /// right while the outgoing picture leaves to the left; a zoom punches
+    /// the incoming picture down through a dissolve. Anything else is
+    /// ignored.
     pub kind: String,
     /// Seconds the transition covers.
     pub duration: f64,
@@ -166,6 +218,9 @@ fn yes() -> bool {
 fn unity() -> f64 {
     1.0
 }
+
+/// Where a zoom transition's punch starts, settling to one.
+const ZOOM_PUNCH: f64 = 1.25;
 
 /// Everything a full export needs: the destination, the output format, and
 /// the flattened clip list.
@@ -263,33 +318,63 @@ fn resolve_transitions(clips: &mut [ExportClip], rate: FrameRate, bake_fades: bo
 
     for cut in cuts {
         match cut.kind.as_str() {
-            "cross-fade" => {
+            // The overlap family: the incoming clip extends backwards over
+            // the outgoing one on a lane of its own, and a per-kind ramp says
+            // how it arrives - a dissolve fades, wipes slide in from a side,
+            // a push slides in while the old picture leaves, a zoom punches
+            // down through a dissolve.
+            "cross-fade" | "wipe-left" | "wipe-right" | "push" | "zoom" => {
                 let (a_track, a_duration) = {
                     let a = &clips[cut.outgoing];
                     (a.track, a.duration)
                 };
-                let b = &mut clips[cut.incoming];
 
                 // The incoming clip extends backwards over the outgoing one,
                 // showing the source it has *before* its in-point - the
                 // handle, exactly what a dissolve consumes in any editor. No
-                // handle, shorter dissolve: the duration clamps to what
+                // handle, shorter transition: the duration clamps to what
                 // actually exists rather than freezing or inventing frames.
-                let mut d = cut.duration.min(a_duration).min(b.duration);
-                if b.kind != ClipKind::Image {
-                    d = d.min(b.source_start / b.speed.max(0.0625));
+                let mut d = cut.duration.min(a_duration).min(clips[cut.incoming].duration);
+                if clips[cut.incoming].kind != ClipKind::Image {
+                    d = d.min(clips[cut.incoming].source_start
+                        / clips[cut.incoming].speed.max(0.0625));
                 }
                 if d < frame {
                     continue;
                 }
+
+                // A push moves the outgoing picture out too, over the same
+                // window and at the same speed as the incoming arrives.
+                if cut.kind == "push" {
+                    clips[cut.outgoing].motion_out =
+                        Some(MotionSpec { side: -1.0, factor: 1.0, duration: d });
+                }
+
+                let b = &mut clips[cut.incoming];
                 b.start -= d;
                 b.duration += d;
                 if b.kind != ClipKind::Image {
                     b.source_start -= d * b.speed;
                 }
-                b.video_fade_in = d;
+                match cut.kind.as_str() {
+                    // The longer of the transition's ramp and any fade the
+                    // user already set: a dissolve must not quietly shorten a
+                    // deliberate fade-in.
+                    "cross-fade" => b.video_fade_in = b.video_fade_in.max(d),
+                    "wipe-left" | "push" => {
+                        b.motion_in = Some(MotionSpec { side: 1.0, factor: 1.0, duration: d });
+                    }
+                    "wipe-right" => {
+                        b.motion_in = Some(MotionSpec { side: -1.0, factor: 1.0, duration: d });
+                    }
+                    _ => {
+                        b.video_fade_in = b.video_fade_in.max(d);
+                        b.motion_in =
+                            Some(MotionSpec { side: 0.0, factor: ZOOM_PUNCH, duration: d });
+                    }
+                }
                 // Sound rides the picture: the pre-roll fades in rather than
-                // arriving at full level a dissolve early.
+                // arriving at full level a transition early.
                 b.fade_in = b.fade_in.max(d);
                 b.track = a_track + 1;
             }
@@ -658,6 +743,11 @@ fn build_timeline(request: &ExportRequest, rate: FrameRate, visible: &[&ExportCl
         // Quantised like every other time: the ramp must land on the same
         // frame grid the overlap does, or the dissolve ends a frame early.
         engine_clip.video_fade_in = quantise(clip.video_fade_in, rate);
+        engine_clip.video_fade_out = quantise(clip.video_fade_out, rate);
+        // Transition geometry, quantised onto the same grid for the same
+        // reason - a slide that outlasts its overlap by a frame shows.
+        engine_clip.motion_in = clip.motion_in.map(|motion| motion.to_ramp(rate));
+        engine_clip.motion_out = clip.motion_out.map(|motion| motion.to_ramp(rate));
 
         if let Some(id) = timeline.add_clip(tracks[clip.track], engine_clip) {
             if clip.kind == ClipKind::Image {
@@ -878,9 +968,12 @@ mod tests {
             video_filter_chain: String::new(),
             transition: None,
             video_fade_in: 0.0,
+            video_fade_out: 0.0,
             media_width: None,
             media_height: None,
             has_audio: None,
+            motion_in: None,
+            motion_out: None,
         }
     }
 
@@ -998,6 +1091,15 @@ mod tests {
     }
 
     #[test]
+    fn a_dissolve_does_not_shorten_a_users_fade() {
+        let mut clips = vec![clip("video", 0, 0.0, 4.0, 0.0), clip("video", 0, 4.0, 4.0, 2.0)];
+        clips[1].video_fade_in = 2.0; // the user's deliberate fade-in
+        clips[1].transition = spec("cross-fade", 1.0);
+        resolve_transitions(&mut clips, FrameRate::THIRTY, true);
+        assert_eq!(clips[1].video_fade_in, 2.0, "the longer window wins");
+    }
+
+    #[test]
     fn a_cross_fade_clamps_to_the_available_handle() {
         let mut clips = vec![clip("video", 0, 0.0, 4.0, 0.0), clip("video", 0, 4.0, 4.0, 0.25)];
         clips[1].transition = spec("cross-fade", 2.0);
@@ -1017,6 +1119,63 @@ mod tests {
         resolve_transitions(&mut clips, FrameRate::THIRTY, true);
         assert_eq!(clips[1].video_fade_in, 1.0);
         assert_eq!(clips[1].source_start, 0.0, "a still has no source clock to rewind");
+    }
+
+    #[test]
+    fn wipes_slide_the_incoming_picture_in_opaque() {
+        let mut clips = vec![clip("video", 0, 0.0, 4.0, 0.0), clip("video", 0, 4.0, 4.0, 2.0)];
+        clips[1].transition = spec("wipe-left", 1.0);
+        resolve_transitions(&mut clips, FrameRate::THIRTY, true);
+
+        let b = &clips[1];
+        assert_eq!(b.start, 3.0, "the overlap structure a dissolve uses");
+        assert_eq!(b.track, 1, "on the odd lane above the pair");
+        assert_eq!(b.video_fade_in, 0.0, "a wipe arrives opaque");
+        assert_eq!(b.motion_in.map(|motion| (motion.side, motion.factor)), Some((1.0, 1.0)));
+        assert_eq!(b.motion_out, None, "the outgoing picture stays put");
+
+        let mut right = vec![clip("video", 0, 0.0, 4.0, 0.0), clip("video", 0, 4.0, 4.0, 2.0)];
+        right[1].transition = spec("wipe-right", 1.0);
+        resolve_transitions(&mut right, FrameRate::THIRTY, true);
+        assert_eq!(right[1].motion_in.map(|motion| motion.side), Some(-1.0));
+    }
+
+    #[test]
+    fn a_push_slides_both_pictures() {
+        let mut clips = vec![clip("video", 0, 0.0, 4.0, 0.0), clip("video", 0, 4.0, 4.0, 2.0)];
+        clips[1].transition = spec("push", 1.0);
+        resolve_transitions(&mut clips, FrameRate::THIRTY, true);
+
+        assert_eq!(clips[1].motion_in.map(|motion| motion.side), Some(1.0), "enters from the right");
+        let out = clips[0].motion_out.expect("the outgoing picture is pushed out");
+        assert_eq!(out.side, -1.0, "leaves to the left");
+        assert_eq!(out.duration, clips[1].motion_in.expect("ramp").duration, "one shared window");
+        assert_eq!(clips[1].video_fade_in, 0.0, "a push is opaque");
+    }
+
+    #[test]
+    fn a_zoom_punches_in_through_a_dissolve() {
+        let mut clips = vec![clip("video", 0, 0.0, 4.0, 0.0), clip("video", 0, 4.0, 4.0, 2.0)];
+        clips[1].transition = spec("zoom", 1.0);
+        resolve_transitions(&mut clips, FrameRate::THIRTY, true);
+
+        let b = &clips[1];
+        assert_eq!(b.video_fade_in, 1.0, "dissolves while it settles");
+        let motion = b.motion_in.expect("punches in");
+        assert_eq!(motion.side, 0.0);
+        assert_eq!(motion.factor, ZOOM_PUNCH);
+    }
+
+    #[test]
+    fn slide_transitions_lower_for_the_preview_too() {
+        // Unlike fade-to-colour, slides are structural - the paused monitor
+        // must show the same geometry the exporter draws.
+        let mut clips = vec![clip("video", 0, 0.0, 4.0, 0.0), clip("video", 0, 4.0, 4.0, 2.0)];
+        clips[1].transition = spec("push", 1.0);
+        resolve_transitions(&mut clips, FrameRate::THIRTY, false);
+
+        assert_eq!(clips[1].motion_in.map(|motion| motion.side), Some(1.0));
+        assert!(clips[0].motion_out.is_some());
     }
 
     #[test]
@@ -1073,7 +1232,7 @@ mod tests {
     #[test]
     fn an_unknown_transition_kind_renders_as_a_plain_cut() {
         let mut clips = vec![clip("video", 0, 0.0, 2.0, 0.0), clip("video", 0, 2.0, 2.0, 0.0)];
-        clips[1].transition = spec("wipe-left", 1.0);
+        clips[1].transition = spec("swirl", 1.0);
         resolve_transitions(&mut clips, FrameRate::THIRTY, true);
         assert_eq!(clips[1].start, 2.0);
         assert!(clips[1].video_filter_chain.is_empty());

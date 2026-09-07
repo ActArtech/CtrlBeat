@@ -15,10 +15,11 @@ mediaId: string,
  */
 start: number, 
 /**
- * Editorial length in seconds, floored at the engine minimum.
+ * Editorial length in seconds, floored at [`MIN_CLIP_DURATION`].
  */
 duration: number, 
 /**
- * Optional source in-point for video. When absent, the clip starts at media time 0.
+ * Optional source in-point for video (and stills, unused). When absent,
+ * the clip starts at media time 0.
  */
 sourceStart?: number, };

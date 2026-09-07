@@ -11,7 +11,7 @@
 use std::path::PathBuf;
 
 use wolfcut_core::time::Rational;
-use wolfcut_core::timeline::{ClipId, Timeline, TrackKind, Transform};
+use wolfcut_core::timeline::{Clip, ClipId, Timeline, TrackKind, Transform};
 
 /// One visible layer at one instant.
 #[derive(Clone, PartialEq, Debug)]
@@ -82,11 +82,25 @@ pub fn plan_frame(timeline: &Timeline, time: Rational) -> FramePlan {
             // The fade ramp multiplies in here, so the compositor only ever
             // sees a per-frame opacity - it has no idea fades exist.
             opacity: (clip.opacity * clip.video_fade_factor(time)).clamp(0.0, 1.0),
-            transform: clip.transform,
+            // The motion ramps fold in the same way: the compositor sees a
+            // plain per-frame transform and knows nothing of transitions.
+            transform: placed_transform(clip, time),
         });
     }
 
     FramePlan { time, width: timeline.width, height: timeline.height, layers }
+}
+
+/// The clip's own transform with its motion ramps applied for `time`.
+///
+/// Identity for the common clip with no motion, so plans stay cheap and
+/// comparisons in tests stay exact.
+fn placed_transform(clip: &Clip, time: Rational) -> Transform {
+    let (offset_x, scale) = clip.motion_at(time);
+    if offset_x == 0.0 && scale == 1.0 {
+        return clip.transform;
+    }
+    Transform { offset_x: clip.transform.offset_x + offset_x, scale: clip.transform.scale * scale, ..clip.transform }
 }
 
 #[cfg(test)]
@@ -192,5 +206,27 @@ mod tests {
         timeline.add_clip(track, clip).expect("track exists");
 
         assert_eq!(plan_frame(&timeline, seconds(1)).layers[0].opacity, 1.0);
+    }
+
+    #[test]
+    fn motion_ramps_fold_into_the_planned_transform() {
+        use wolfcut_core::timeline::{Motion, MotionRamp};
+
+        let mut timeline = Timeline::new(640, 360, FrameRate::THIRTY);
+        let track = timeline.add_track(Track::new("V1", TrackKind::Video));
+        let mut clip = Clip::new(MediaRef::new("a.mp4"), seconds(0), seconds(10));
+        clip.transform.offset_x = 0.1;
+        clip.motion_in = Some(MotionRamp {
+            motion: Motion::Slide { side: 1.0 },
+            duration: Rational::from_int(2),
+        });
+        timeline.add_clip(track, clip).expect("track exists");
+
+        // Halfway through the ramp the slide adds half a frame-width to the
+        // clip's own offset; once settled, only the clip's own transform.
+        let planned = plan_frame(&timeline, seconds(1)).layers[0].transform;
+        assert!((planned.offset_x - 0.6).abs() < 1e-9);
+        let settled = plan_frame(&timeline, seconds(5)).layers[0].transform;
+        assert_eq!(settled.offset_x, 0.1);
     }
 }

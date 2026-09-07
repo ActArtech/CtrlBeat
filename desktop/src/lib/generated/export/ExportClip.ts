@@ -95,10 +95,16 @@ videoFilterChain: string,
  */
 transition?: TransitionSpec | null, 
 /**
- * Video opacity ramp up from the clip's start, in seconds. Set by
- * transition resolution below, never by the UI directly.
+ * Video opacity ramp up from the clip's start, in seconds. The user's
+ * fade-in arrives here via `flatten` (one fade fades picture and sound);
+ * transition resolution may stretch it over a dissolve's pre-roll.
  */
 videoFadeIn?: number, 
+/**
+ * Video opacity ramp back down into the clip's end, in seconds. The
+ * user's fade-out, exactly the fade-in mirrored.
+ */
+videoFadeOut?: number, 
 /**
  * The source's pixel width, when the UI knows it. What makes an
  * aspect-correct decode possible - absent, the frame is filled edge to

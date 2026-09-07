@@ -375,6 +375,20 @@ pub struct Segment {
     start: f64,
     end: f64,
     text: String,
+    /// Token-level timing, present when the binary's full JSON carried it -
+    /// the word-by-word caption style is built from these. Absent means the
+    /// run (or an old binary) only produced segment timing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    words: Option<Vec<Word>>,
+}
+
+/// One word inside a segment, timed by whisper's token offsets.
+#[derive(Serialize, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Word {
+    start: f64,
+    end: f64,
+    text: String,
 }
 
 /// The one transcription that can run at a time: a gate that refuses a
@@ -477,6 +491,11 @@ pub struct TranscribeRequest {
     pub language: String,
     /// Which model to use, e.g. "base.en".
     pub model_id: String,
+    /// Ask for token-level timestamps too (whisper's full JSON output). A
+    /// binary too old to know the flag still transcribes: the run falls back
+    /// to one plain rerun, minus word timing.
+    #[serde(default)]
+    pub word_timestamps: bool,
 }
 
 /// Transcribes one clip's audio window into caption segments.
@@ -558,20 +577,36 @@ fn run_transcription(
             .map(|count| count.get().min(8))
             .unwrap_or(4);
 
-        let mut command = wolfcut_media::command(&binary);
-        command
-            .arg("-m")
-            .arg(&model)
-            .arg("-f")
-            .arg(&wav)
-            .args(["-l", &request.language])
-            .args(["-t", &threads.to_string()])
-            // JSON to a file: stdout is progress noise, the file is the data.
-            .arg("-oj")
-            .arg("-of")
-            .arg(&out_base)
-            .args(["-np"]);
-        run_killable(command, slot, "whisper-cli")?;
+        // The whisper invocation, parameterised only on the JSON flavour:
+        // full (`-ojf`, segments + per-token offsets) when word timing was
+        // asked for, plain segments otherwise. Same file either way.
+        let mut build = |full: bool| {
+            let mut command = wolfcut_media::command(&binary);
+            command
+                .arg("-m")
+                .arg(&model)
+                .arg("-f")
+                .arg(&wav)
+                .args(["-l", &request.language])
+                .args(["-t", &threads.to_string()])
+                // JSON to a file: stdout is progress noise, the file is the data.
+                .args(if full { ["-ojf"] } else { ["-oj"] })
+                .arg("-of")
+                .arg(&out_base)
+                .args(["-np"]);
+            command
+        };
+
+        match run_killable(build(request.word_timestamps), slot, "whisper-cli") {
+            Ok(()) => {}
+            // A binary from before the full-JSON flag still transcribes; one
+            // plain rerun keeps captions working, minus word timing.
+            Err(error) if request.word_timestamps => {
+                run_killable(build(false), slot, "whisper-cli")?;
+                let _ = error;
+            }
+            Err(error) => return Err(error),
+        }
 
         let text = std::fs::read_to_string(&json)
             .map_err(|error| format!("whisper wrote no output: {error}"))?;
@@ -585,7 +620,7 @@ fn run_transcription(
     result
 }
 
-/// Pulls segments out of whisper-cli's `-oj` JSON.
+/// Pulls segments out of whisper-cli's `-oj` / `-ojf` JSON.
 ///
 /// Only `offsets` (integer milliseconds) are read. The pretty `timestamps`
 /// strings next to them are for subtitle files, and parsing clocks out of
@@ -610,9 +645,64 @@ fn parse_whisper_json(text: &str) -> Result<Vec<Segment>, String> {
             if text.is_empty() || (text.starts_with('[') && text.ends_with(']')) {
                 return None;
             }
-            (end > start).then_some(Segment { start, end, text })
+            (end > start).then_some(Segment { start, end, text, words: words_from_tokens(entry) })
         })
         .collect())
+}
+
+/// Rebuilds timed words from a segment's `tokens`, the full-JSON field.
+///
+/// Whisper tokenises with a leading space per word ("▁Hello" reads as
+/// " Hello"), so a token starting with whitespace opens a new word and every
+/// other token - BPE pieces of a contraction, punctuation - attaches to the
+/// one in progress. A word runs from its first token's start to its last
+/// token's end, in milliseconds like the segment offsets. A segment without
+/// tokens (plain `-oj` output, or an old binary) yields `None`, not empty:
+/// the caller should read that as "no word timing available", distinct from
+/// "the words were all droppable".
+fn words_from_tokens(entry: &serde_json::Value) -> Option<Vec<Word>> {
+    let tokens = entry.get("tokens")?.as_array()?;
+
+    let mut words: Vec<Word> = Vec::new();
+    let mut current: Option<Word> = None;
+
+    for token in tokens {
+        let text = token.get("text").and_then(|value| value.as_str()).unwrap_or("");
+        let from = token
+            .get("offsets")
+            .and_then(|offsets| offsets.get("from"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0) as f64
+            / 1000.0;
+        let to = token
+            .get("offsets")
+            .and_then(|offsets| offsets.get("to"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0) as f64
+            / 1000.0;
+
+        if text.starts_with(char::is_whitespace) || current.is_none() {
+            finish_word(current.take(), &mut words);
+            current = Some(Word { start: from, end: to, text: text.trim().to_owned() });
+        } else if let Some(word) = current.as_mut() {
+            word.text.push_str(text.trim());
+            word.end = word.end.max(to);
+        }
+    }
+    finish_word(current, &mut words);
+
+    Some(words)
+}
+
+/// Keeps a finished word if it says anything and lasts any time at all.
+fn finish_word(word: Option<Word>, words: &mut Vec<Word>) {
+    let Some(word) = word else { return };
+    let bracketed =
+        (word.text.starts_with('[') && word.text.ends_with(']'))
+            || (word.text.starts_with('(') && word.text.ends_with(')'));
+    if !word.text.is_empty() && !bracketed && word.end > word.start {
+        words.push(word);
+    }
 }
 
 #[cfg(test)]
@@ -639,6 +729,74 @@ mod tests {
     fn refuses_output_with_no_transcription() {
         assert!(parse_whisper_json("{}").is_err());
         assert!(parse_whisper_json("not json").is_err());
+    }
+
+    #[test]
+    fn plain_segment_output_carries_no_words() {
+        let json = r#"{"transcription":[
+            {"offsets":{"from":0,"to":2500},"text":" Hello there."}
+        ]}"#;
+        let segments = parse_whisper_json(json).expect("parses");
+        assert_eq!(segments[0].words, None, "no tokens means no word timing");
+    }
+
+    #[test]
+    fn full_json_times_words_and_attaches_punctuation() {
+        let json = r#"{"transcription":[
+            {"offsets":{"from":0,"to":2000},"text":" Hello there.",
+             "tokens":[
+                {"text":" Hello","offsets":{"from":0,"to":700}},
+                {"text":" there","offsets":{"from":700,"to":1500}},
+                {"text":".","offsets":{"from":1500,"to":1600}}
+             ]}
+        ]}"#;
+        let segments = parse_whisper_json(json).expect("parses");
+        let words = segments[0].words.as_ref().expect("token timing");
+        assert_eq!(
+            words,
+            &[
+                Word { start: 0.0, end: 0.7, text: "Hello".to_owned() },
+                // The period rides the word it closes, extending its end.
+                Word { start: 0.7, end: 1.6, text: "there.".to_owned() },
+            ]
+        );
+    }
+
+    #[test]
+    fn contraction_pieces_join_into_one_word() {
+        let json = r#"{"transcription":[
+            {"offsets":{"from":0,"to":1000},"text":" don't",
+             "tokens":[
+                {"text":" don","offsets":{"from":0,"to":400}},
+                {"text":"'t","offsets":{"from":400,"to":600}}
+             ]}
+        ]}"#;
+        let segments = parse_whisper_json(json).expect("parses");
+        let words = segments[0].words.as_ref().expect("token timing");
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].text, "don't");
+        assert!((words[0].end - 0.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn bracketed_and_degenerate_words_are_dropped() {
+        let json = r#"{"transcription":[
+            {"offsets":{"from":0,"to":2000},"text":" [BLANK_AUDIO] hey",
+             "tokens":[
+                {"text":" [","offsets":{"from":0,"to":300}},
+                {"text":"BLANK","offsets":{"from":300,"to":500}},
+                {"text":"_AUDIO","offsets":{"from":500,"to":700}},
+                {"text":"]","offsets":{"from":700,"to":800}},
+                {"text":" hey","offsets":{"from":800,"to":1200}}
+             ]}
+        ]}"#;
+        let segments = parse_whisper_json(json).expect("parses");
+        let words = segments[0].words.as_ref().expect("token timing");
+        assert_eq!(
+            words,
+            &[Word { start: 0.8, end: 1.2, text: "hey".to_owned() }],
+            "the stage direction dissolves; only the spoken word survives"
+        );
     }
 
     #[test]

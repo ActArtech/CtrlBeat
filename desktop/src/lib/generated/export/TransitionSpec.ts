@@ -5,7 +5,12 @@
  */
 export type TransitionSpec = { 
 /**
- * "cross-fade", "fade-black" or "fade-white". Anything else is ignored.
+ * "cross-fade", "fade-black", "fade-white", "wipe-left", "wipe-right",
+ * "push" or "zoom". A wipe slides the incoming picture in from the edge
+ * the name says the wipe travels toward; a push slides it in from the
+ * right while the outgoing picture leaves to the left; a zoom punches
+ * the incoming picture down through a dissolve. Anything else is
+ * ignored.
  */
 kind: string, 
 /**
