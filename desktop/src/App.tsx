@@ -4,9 +4,11 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
+import { BakeDialog } from "./components/BakeDialog";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ContextMenu, type ContextTarget } from "./components/ContextMenu";
 import { ExportDialog } from "./components/ExportDialog";
+import { LyricsDialog, type LyricsConfig } from "./components/LyricsDialog";
 import { TtsDialog } from "./components/TtsDialog";
 import { Icon } from "./components/Icon";
 import { ALL_MEDIA, MediaBin, type BinFilter } from "./components/MediaBin";
@@ -16,6 +18,8 @@ import { Preview } from "./components/Preview";
 import {
   exportTitlesOf,
   previewGhostAt,
+  previewMainMotionAt,
+  previewPictureFadeAt,
   previewSourceAt,
   previewVeilAt,
   textOverlaysAt,
@@ -61,16 +65,8 @@ import {
 } from "./lib/engine";
 import { planMediaOnBeats } from "./lib/beatPlacement";
 import { snapToNearest } from "./lib/beatTimeline";
-import { beatPulseIntensity } from "./lib/codevice/beatPulse";
-import { canvasToJpegBytes, renderBeatSymbols } from "./lib/codevice/renderBeatSymbols";
+import { planLyricsOnBeats } from "./lib/lyrics";
 import { type SymbolSetId } from "./lib/codevice/symbolSets";
-import {
-  loadImageFromBytes,
-  processFrameToAscii,
-} from "./lib/codevice/videoAsciiEngine";
-import { renderMusicVisualizer } from "./lib/codevice/musicVisualizer";
-import { asciiPaletteById } from "./lib/codevice/asciiPalettes";
-import { selectBeatTimes } from "./lib/beatPlacement";
 import {
   clampScale,
   displayedSize,
@@ -80,9 +76,10 @@ import {
   scaleToMatchWidth,
 } from "./lib/clipFit";
 import { findTransition } from "./lib/effects";
-import { familyForPath, registerFont } from "./lib/text";
+import { defaultTextStyle, familyForPath, registerFont } from "./lib/text";
 import { useLocale } from "./lib/i18n";
 import { useAsciiOverlay } from "./hooks/useAsciiOverlay";
+import { useBakeOverlay } from "./hooks/useBakeOverlay";
 import { useBeatsWorkflow } from "./hooks/useBeatsWorkflow";
 import { useCaptions } from "./hooks/useCaptions";
 import { useEngineSession } from "./hooks/useEngineSession";
@@ -226,11 +223,6 @@ function Editor({
   const [missingFonts, setMissingFonts] = useState<Set<string>>(new Set());
   /** Codeviceanim-style glyph set (13 presets) for beat-synced symbol clips. */
   const [symbolSetId, setSymbolSetId] = useState<SymbolSetId>("techMap");
-  const [bakingSymbols, setBakingSymbols] = useState(false);
-  /** Sync mutex so Place + Export cannot double-bake. */
-  const bakeInflightRef = useRef<Promise<number> | null>(null);
-  /** Skip rebake when settings + beats have not changed. */
-  const lastBakeKeyRef = useRef("");
   const {
     asciiLivePreview,
     setAsciiLivePreview,
@@ -338,6 +330,8 @@ function Editor({
   // The save-as-template sheet: null closed, otherwise whether the host is
   // packing the bundle right now.
   const [templateDialog, setTemplateDialog] = useState<null | { busy: boolean }>(null);
+  // The lyrics-on-beats sheet.
+  const [lyricsOpen, setLyricsOpen] = useState(false);
 
   useEffect(() => {
     engineVersion()
@@ -564,7 +558,12 @@ function Editor({
       if (!definition?.implemented) return;
       const current = latest.current.project;
       const selected = selectedClipIds.length === 1 ? findClip(current, selectedClipIds[0]) : null;
-      if (!selected || (selected.kind !== "video" && selected.kind !== "image")) {
+      // Titles take transitions too: at export they are rasterised PNGs on a
+      // track, which lower through the same overlap machinery as any visual.
+      if (
+        !selected ||
+        (selected.kind !== "video" && selected.kind !== "image" && selected.kind !== "text")
+      ) {
         setToast({
           id: Date.now(),
           message: t("toast.transitionNeedsClip"),
@@ -593,6 +592,91 @@ function Editor({
       });
     },
     [selectedClipIds, dispatch, t],
+  );
+
+  /**
+   * One transition on every cut of the active timeline, as one batch - one
+   * undo step for the whole sweep, not one per cut. A cut is the engine's own
+   * definition: a visual clip that begins where a visual clip on its track
+   * ends.
+   */
+  const applyTransitionToAll = useCallback(
+    (transitionId: string) => {
+      const definition = findTransition(transitionId);
+      if (!definition?.implemented) return;
+      const current = latest.current.project;
+      const target = { id: transitionId, duration: definition.defaultDuration };
+      const commands = activeTimeline(current)
+        .clips.filter((clip) => clip.kind !== "audio")
+        .filter((clip) => precedingClip(current, clip.id))
+        .filter(
+          (clip) =>
+            clip.transitionIn?.id !== target.id ||
+            clip.transitionIn.duration !== target.duration,
+        )
+        .map((clip) => ({
+          op: "updateClip" as const,
+          clipId: clip.id,
+          patch: { transitionIn: target },
+        }));
+      if (commands.length === 0) {
+        pushToast(t("toast.transitionNoCuts"), true);
+        return;
+      }
+      void dispatch(commands.length === 1 ? commands[0]! : { op: "batch", commands }).then(() => {
+        pushToast(
+          t("toast.transitionAppliedToAll", {
+            name: definition.label,
+            count: String(commands.length),
+          }),
+          false,
+        );
+      });
+    },
+    [dispatch, pushToast, t],
+  );
+
+  /**
+   * One transition on every cut *within the selection* - the scoped sibling
+   * of the every-cut sweep. Same rules: the clip must be visual and begin
+   * where a visual clip on its track ends; one batch, one undo step.
+   */
+  const applyTransitionToSelected = useCallback(
+    (transitionId: string) => {
+      const definition = findTransition(transitionId);
+      if (!definition?.implemented) return;
+      const current = latest.current.project;
+      const selected = new Set(selectedClipIds);
+      const target = { id: transitionId, duration: definition.defaultDuration };
+      const commands = activeTimeline(current)
+        .clips.filter((clip) => selected.has(clip.id))
+        .filter((clip) => clip.kind !== "audio")
+        .filter((clip) => precedingClip(current, clip.id))
+        .filter(
+          (clip) =>
+            clip.transitionIn?.id !== target.id ||
+            clip.transitionIn.duration !== target.duration,
+        )
+        .map((clip) => ({
+          op: "updateClip" as const,
+          clipId: clip.id,
+          patch: { transitionIn: target },
+        }));
+      if (commands.length === 0) {
+        pushToast(t("toast.transitionNoSelectedCuts"), true);
+        return;
+      }
+      void dispatch(commands.length === 1 ? commands[0]! : { op: "batch", commands }).then(() => {
+        pushToast(
+          t("toast.transitionAppliedToSelection", {
+            name: definition.label,
+            count: String(commands.length),
+          }),
+          false,
+        );
+      });
+    },
+    [selectedClipIds, dispatch, pushToast, t],
   );
 
   const { autoCaption, transcribing } = useCaptions({
@@ -702,7 +786,7 @@ function Editor({
     void dispatch({
       op: "placeImageClips",
       placements,
-      trackId: null,
+      // No track named: the engine picks the first free lane for the span.
     }).then((clipId) => {
       if (!clipId) {
         pushToast(t("toast.bakePlaceFailed"), true);
@@ -755,241 +839,149 @@ function Editor({
   }, [selectedClipIds, selectedMediaIds]);
 
   /**
-   * Bake code-symbol frames onto the beat grid.
-   *
-   * With a video selected: sample each beat's frame through the ASCII engine
-   * (codeviceanim-style). Without video: procedural glyph field that pulses
-   * on the beat.
+   * The overlay bake, behind its configuration sheet: nothing encodes until
+   * the dialog's Bake is pressed, and the run reports progress + takes a
+   * cancel between frames. See useBakeOverlay and BakeDialog.
    */
-  /**
-   * Live overlay is preview-only. Export only sees real timeline clips, so
-   * ASCII / visualizer must be baked onto a top track before export.
-   *
-   * Returns frame count, or -1 when the same bake was already applied
-   * (settings + beats unchanged).
-   */
-  const bakeOverlayToTimeline = useCallback(
-    async (kind: "ascii" | "visualizer"): Promise<number> => {
-      if (bakeInflightRef.current) return bakeInflightRef.current;
-
-      const run = (async () => {
-        const usedBeats = selectBeatTimes(timelineBeats, { beatsPerImage });
-        if (usedBeats.length === 0) return 0;
-
-        const bakeKey = [
-          kind,
-          beatsPerImage,
-          visualizerPreset,
-          visualizerLayout,
-          vizColorMode,
-          vizCount,
-          symbolSetId,
-          asciiColorMode,
-          asciiPaletteId,
-          asciiMotion,
-          usedBeats.length,
-          usedBeats[0]?.toFixed(3),
-          usedBeats[usedBeats.length - 1]?.toFixed(3),
-        ].join("|");
-        if (lastBakeKeyRef.current === bakeKey) return -1;
-
-        const width = frame.width || 1920;
-        const height = frame.height || 1080;
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const offscreen = document.createElement("canvas");
-        const placements: { mediaId: string; start: number; duration: number }[] = [];
-        const videoSource = kind === "ascii" ? resolveVideoForAscii() : null;
-        const mode = videoSource ? "video" : "procedural";
-
-        const endCap = (() => {
-          const current = latest.current.project;
-          if (beatAnalysis?.clipId) {
-            const clip = findClip(current, beatAnalysis.clipId);
-            if (clip) {
-              const mediaLen =
-                beatAnalysis.duration > 0 ? beatAnalysis.duration : clip.duration;
-              const speed = clip.speed > 0 ? clip.speed : 1;
-              return clip.start + (mediaLen - clip.sourceStart) / speed;
-            }
-          }
-          return beatAnalysis?.duration;
-        })();
-
-        // New top track so baked frames sit above the source picture in export.
-        const trackId = await dispatch({ op: "addTrack" });
-        if (!trackId) {
-          throw new Error(t("toast.bakeTrackFailed"));
-        }
-
-        for (let i = 0; i < usedBeats.length; i++) {
-          const start = usedBeats[i]!;
-          const next =
-            i + 1 < usedBeats.length
-              ? usedBeats[i + 1]!
-              : endCap !== undefined
-                ? endCap
-                : start + 5;
-          const duration = Math.max(1 / 60, next - start);
-          const intensity = Math.max(
-            0.35,
-            beatPulseIntensity(start, timelineBeats, Math.min(0.2, duration * 0.4)),
-          );
-
-          if (kind === "visualizer") {
-            const palette = asciiPaletteById(asciiPaletteId);
-            renderMusicVisualizer(canvas, {
-              width,
-              height,
-              time: start,
-              intensity,
-              voice: 0,
-              preset: visualizerPreset,
-              layout: visualizerLayout,
-              foreground: palette.foreground,
-              accent: palette.accent,
-              colorMode: vizColorMode,
-              count: vizCount > 0 ? vizCount : undefined,
-            });
-          } else if (videoSource) {
-            const { media, clip } = videoSource;
-            let mediaTime = start;
-            if (clip) {
-              mediaTime = clip.sourceStart + (start - clip.start) * clip.speed;
-              mediaTime = Math.max(0, mediaTime);
-              if (media.duration && media.duration > 0) {
-                mediaTime = Math.min(mediaTime, Math.max(0, media.duration - 0.05));
-              }
-            } else if (media.duration && media.duration > 0) {
-              mediaTime = Math.min(start, Math.max(0, media.duration - 0.05));
-            }
-            const still = new Uint8Array(await extractStill(media.path, mediaTime));
-            const image = await loadImageFromBytes(still);
-            const gridSize = Math.max(6, Math.round(14 * (1 - intensity * 0.3)));
-            const palette = asciiPaletteById(asciiPaletteId);
-            processFrameToAscii(
-              image,
-              canvas,
-              {
-                symbolSetId,
-                gridSize,
-                brightness: Math.round(intensity * 20),
-                contrast: 10,
-                enableEdgeSlashes: true,
-                background: palette.background,
-                foreground: palette.foreground,
-                accent: palette.accent,
-                colorMode: asciiColorMode,
-                motion: asciiMotion,
-                time: start,
-              },
-              offscreen,
-            );
-          } else {
-            renderBeatSymbols(canvas, {
-              width,
-              height,
-              intensity,
-              symbolSetId,
-              seed: i + 1,
-            });
-          }
-
-          const bytes = await canvasToJpegBytes(canvas);
-          const key =
-            kind === "visualizer"
-              ? `viz-${visualizerPreset}-${visualizerLayout}-${vizColorMode}-${vizCount}-${i}-${start.toFixed(3).replace(".", "_")}.jpg`
-              : `ascii-${mode}-${symbolSetId}-${asciiColorMode}-${asciiPaletteId}-${asciiMotion}-${i}-${start.toFixed(3).replace(".", "_")}.jpg`;
-          const path = await writeCacheFile(session.path, key, bytes);
-          const mediaItem = newMediaFromSummary(await probeMedia(path));
-          const mediaId = await dispatch({ op: "addMedia", item: mediaItem });
-          if (!mediaId) continue;
-          placements.push({ mediaId, start, duration });
-        }
-
-        if (placements.length === 0) return 0;
-        const clipId = await dispatch({
-          op: "placeImageClips",
-          placements,
-          trackId,
-        });
-        if (!clipId) {
-          throw new Error(t("toast.bakePlaceFailed"));
-        }
-        setSelectedClipIds([clipId]);
-        lastBakeKeyRef.current = bakeKey;
-        return placements.length;
-      })();
-
-      bakeInflightRef.current = run;
-      try {
-        return await run;
-      } finally {
-        if (bakeInflightRef.current === run) bakeInflightRef.current = null;
-      }
-    },
-    [
-      timelineBeats,
-      beatsPerImage,
-      frame.width,
-      frame.height,
-      visualizerPreset,
-      visualizerLayout,
-      symbolSetId,
-      asciiPaletteId,
-      asciiColorMode,
-      asciiMotion,
-      vizColorMode,
-      vizCount,
-      beatAnalysis,
-      session.path,
-      dispatch,
-      resolveVideoForAscii,
-      t,
-    ],
-  );
+  const {
+    request: bakeRequest,
+    open: openBake,
+    close: closeBake,
+    run: runBake,
+    cancel: cancelBake,
+    isAlreadyBaked,
+    planNumbers: bakePlanNumbers,
+    /** The Beats tab's baking state: dialog open or frames streaming. */
+    busy: bakingSymbols,
+  } = useBakeOverlay({
+    projectPath: session.path,
+    getProject: () => latest.current.project,
+    frameWidth: frame.width,
+    frameHeight: frame.height,
+    timelineBeats,
+    beatsPerImage,
+    beatAnalysis,
+    visualizerPreset,
+    visualizerLayout,
+    vizColorMode,
+    vizCount,
+    symbolSetId,
+    asciiColorMode,
+    asciiPaletteId,
+    asciiMotion,
+    asciiDriveMode,
+    audioLevelAt,
+    resolveVideoForAscii,
+    dispatch,
+    setSelectedClipIds,
+  });
 
   const placeCodeSymbolsOnBeats = useCallback(() => {
-    if (timelineBeats.length === 0 || bakingSymbols || bakeInflightRef.current) return;
-    setBakingSymbols(true);
-    void (async () => {
-      try {
-        const count = await bakeOverlayToTimeline("ascii");
-        if (count > 0) {
-          setAsciiLivePreview(false);
-          pushToast(t("toast.asciiVideoPlaced", { count: String(count) }), false);
-        } else if (count === 0) {
-          pushToast(t("toast.bakeEmpty"), true);
-        }
-      } catch (cause) {
-        pushToast(String(cause), true);
-      } finally {
-        setBakingSymbols(false);
-      }
-    })();
-  }, [timelineBeats, bakingSymbols, bakeOverlayToTimeline, setAsciiLivePreview, pushToast, t]);
+    if (timelineBeats.length === 0) {
+      pushToast(t("toast.placeNeedsBeats"), true);
+      return;
+    }
+    openBake("ascii");
+  }, [timelineBeats.length, openBake, pushToast, t]);
 
   /** Bake music-visualizer frames onto the beat grid (particles / kaleidoscope…). */
   const placeVisualizerOnBeats = useCallback(() => {
-    if (timelineBeats.length === 0 || bakingSymbols || bakeInflightRef.current) return;
-    setBakingSymbols(true);
-    void (async () => {
-      try {
-        const count = await bakeOverlayToTimeline("visualizer");
-        if (count > 0) {
-          setAsciiLivePreview(false);
-          pushToast(t("toast.visualizerPlaced", { count: String(count) }), false);
-        } else if (count === 0) {
-          pushToast(t("toast.bakeEmpty"), true);
+    if (timelineBeats.length === 0) {
+      pushToast(t("toast.placeNeedsBeats"), true);
+      return;
+    }
+    openBake("visualizer");
+  }, [timelineBeats.length, openBake, pushToast, t]);
+
+  /** Opens the lyrics sheet; the text and grouping are agreed inside it. */
+  const openLyrics = useCallback(() => {
+    if (timelineBeats.length === 0) {
+      pushToast(t("toast.placeNeedsBeats"), true);
+      return;
+    }
+    setLyricsOpen(true);
+  }, [timelineBeats.length, pushToast, t]);
+
+  /**
+   * Lyrics on beats, as agreed by the sheet: words grouped, then tiled
+   * across the used beats as text clips on a "Lyrics" lane - the text twin
+   * of placing images on the same grid, one batch and one undo step.
+   */
+  const placeLyricsOnBeats = useCallback(
+    (config: LyricsConfig) => {
+      setLyricsOpen(false);
+      const current = latest.current.project;
+      const endTime = (() => {
+        if (beatAnalysis?.clipId) {
+          const clip = findClip(current, beatAnalysis.clipId);
+          if (clip) {
+            const mediaLen = beatAnalysis.duration > 0 ? beatAnalysis.duration : clip.duration;
+            const speed = clip.speed > 0 ? clip.speed : 1;
+            return clip.start + (mediaLen - clip.sourceStart) / speed;
+          }
         }
-      } catch (cause) {
-        pushToast(String(cause), true);
-      } finally {
-        setBakingSymbols(false);
+        return beatAnalysis?.duration;
+      })();
+
+      const placements = planLyricsOnBeats(config.text, timelineBeats, {
+        wordsPerGroup: config.wordsPerGroup,
+        beatsPerGroup: config.beatsPerGroup,
+        endTime,
+      });
+      if (placements.length === 0) {
+        pushToast(t("toast.lyricsNoFit"), true);
+        return;
       }
-    })();
-  }, [timelineBeats, bakingSymbols, bakeOverlayToTimeline, setAsciiLivePreview, pushToast, t]);
+
+      void (async () => {
+        try {
+          // The captions pattern: a named lane, created on first use and
+          // reused after, so re-placing lyrics never stacks lanes.
+          let trackId = activeTimeline(latest.current.project).tracks.find(
+            (track) => track.name === "Lyrics",
+          )?.id;
+          if (!trackId) {
+            trackId = await dispatch({ op: "addTrack" });
+            if (!trackId) return;
+            await dispatch({ op: "renameTrack", trackId, name: "Lyrics" });
+          }
+          await dispatch({
+            op: "batch",
+            commands: placements.map((placement) => ({
+              op: "addTextClip" as const,
+              trackId,
+              start: placement.start,
+              duration: placement.duration,
+              offsetY: 0.38,
+              // Caption-sized and lower-third, like the captions lane.
+              style: { ...defaultTextStyle(), content: placement.text, fontSize: 0.045 },
+            })),
+          });
+          pushToast(t("toast.lyricsPlaced", { count: String(placements.length) }), false);
+        } catch (cause) {
+          pushToast(String(cause), true);
+        }
+      })();
+    },
+    [timelineBeats, beatAnalysis, dispatch, pushToast, t],
+  );
+
+  /** Success from the bake sheet: toasts, and Export continues if it waited. */
+  const handleBakePlaced = useCallback(
+    (kind: "ascii" | "visualizer", forExport: boolean) => {
+      setAsciiLivePreview(false);
+      if (forExport) {
+        pushToast(t("toast.overlayBakedForExport"), false);
+        setExporting(true);
+      } else {
+        pushToast(
+          t(kind === "visualizer" ? "toast.visualizerPlaced" : "toast.asciiVideoPlaced"),
+          false,
+        );
+      }
+    },
+    [setAsciiLivePreview, pushToast, t],
+  );
 
   /** The clip tools dropdown. Hidden for clips with nothing to offer. */
   const clipTools = useMemo<MenuOption[][]>(() => {
@@ -1433,42 +1425,35 @@ function Editor({
   const openSettings = useCallback(() => setSettingsOpen(true), []);
   const openSpeech = useCallback(() => setSpeech({}), []);
   /**
-   * Live overlay never reaches FFmpeg. If preview ASCII/visualizer is on,
-   * bake it to a top track first so the export matches what you saw.
+   * Live overlay never reaches FFmpeg, so Export needs a baked clip first.
+   * The bake always asks: the sheet opens with the current settings, and
+   * export continues only after Bake succeeds (or is cancelled back here).
+   * The one shortcut is an identical re-bake - settings + beats unchanged
+   * since the last bake - where the clip on the timeline already is the
+   * export's overlay.
    */
   const openExport = useCallback(() => {
-    void (async () => {
-      if (asciiLivePreview && timelineBeats.length > 0) {
-        setBakingSymbols(true);
-        try {
-          const kind = overlaySurface === "visualizer" ? "visualizer" : "ascii";
-          // Await in-flight Place bake if one is running.
-          const count = await bakeOverlayToTimeline(kind);
-          if (count === 0) {
-            pushToast(t("toast.bakeEmpty"), true);
-            return;
-          }
-          if (count > 0) {
-            setAsciiLivePreview(false);
-            pushToast(t("toast.overlayBakedForExport", { count: String(count) }), false);
-          }
-          // count === -1: already baked with same settings; open export as-is.
-        } catch (cause) {
-          pushToast(String(cause), true);
-          return;
-        } finally {
-          setBakingSymbols(false);
-        }
-      } else if (asciiLivePreview) {
-        pushToast(t("toast.liveOverlayNotInExport"), true);
-      }
+    const kind = overlaySurface === "visualizer" ? "visualizer" : "ascii";
+    if (!asciiLivePreview) {
       setExporting(true);
-    })();
+      return;
+    }
+    if (timelineBeats.length === 0) {
+      pushToast(t("toast.liveOverlayNotInExport"), true);
+      return;
+    }
+    if (isAlreadyBaked(kind)) {
+      setAsciiLivePreview(false);
+      setExporting(true);
+      return;
+    }
+    openBake(kind, true);
   }, [
     asciiLivePreview,
     timelineBeats.length,
     overlaySurface,
-    bakeOverlayToTimeline,
+    isAlreadyBaked,
+    openBake,
     setAsciiLivePreview,
     pushToast,
     t,
@@ -1618,6 +1603,18 @@ function Editor({
 
   const previewVeil = useMemo(
     () => previewVeilAt(project, timeline, playhead),
+    [project, timeline, playhead],
+  );
+
+  const mainMotion = useMemo(
+    () => previewMainMotionAt(project, timeline, playhead),
+    [project, timeline, playhead],
+  );
+
+  // The displayed clip's fade, multiplied into its opacity for live playback
+  // - the same factor the engine's truth frame applies.
+  const pictureFade = useMemo(
+    () => previewPictureFadeAt(project, timeline, playhead),
     [project, timeline, playhead],
   );
 
@@ -1902,6 +1899,8 @@ function Editor({
               onAddToTimeline={addToTimeline}
               onApplyEffect={applyEffect}
               onApplyTransition={applyTransition}
+              onApplyTransitionToAll={applyTransitionToAll}
+              onApplyTransitionToSelected={applyTransitionToSelected}
               onToggleSlot={toggleSlot}
               onSaveTemplate={openTemplateDialog}
               onUseTemplate={leaveForTemplate}
@@ -1936,9 +1935,10 @@ function Editor({
                     }
                   : null
               }
-              opacity={previewClip?.opacity ?? 1}
+              opacity={(previewClip?.opacity ?? 1) * pictureFade}
               effects={previewClip?.videoEffects ?? null}
               ghost={previewGhost}
+              mainMotion={mainMotion}
               engineStill={engineStill}
               veil={previewVeil}
               mediaSize={
@@ -2044,6 +2044,7 @@ function Editor({
                 onAnalyze: analyzeBeatsForSelection,
                 onClearBeats: clearBeats,
                 onPlaceImages: placeSelectedImagesOnBeats,
+                onPlaceLyrics: openLyrics,
                 onPlaceSymbols: placeCodeSymbolsOnBeats,
                 onPlaceVisualizer: placeVisualizerOnBeats,
                 onBeatPreset: setBeatPresetId,
@@ -2437,6 +2438,23 @@ function Editor({
         />
       )}
 
+      {bakeRequest && (
+        <BakeDialog
+          request={bakeRequest}
+          planNumbers={bakePlanNumbers}
+          run={runBake}
+          cancel={cancelBake}
+          onClose={closeBake}
+          onPlaced={handleBakePlaced}
+        />
+      )}
+      {lyricsOpen && (
+        <LyricsDialog
+          beatTimes={timelineBeats}
+          onPlace={placeLyricsOnBeats}
+          onClose={() => setLyricsOpen(false)}
+        />
+      )}
       {exporting && (
         <ExportDialog
           projectName={projectName}

@@ -34,7 +34,6 @@ describe("beat slideshow workflow", () => {
     const command: Command = {
       op: "placeImageClips",
       placements,
-      trackId: null,
     };
     expect(command.op).toBe("placeImageClips");
     if (command.op === "placeImageClips") {

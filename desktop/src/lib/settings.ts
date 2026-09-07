@@ -78,3 +78,48 @@ export function getTtsVoice(): number {
 export function setTtsVoice(id: number): void {
   storageSet(TTS_VOICE_KEY, String(id));
 }
+
+const BAKE_LAST_KEY = "ctrlbeat.bake.last";
+
+/** The last applied bake for one project: its folder and settings key. */
+export interface LastBake {
+  projectPath: string;
+  bakeKey: string;
+}
+
+/**
+ * Remembers the last bake applied to a project, so reopening it and exporting
+ * with identical settings + beats skips a redundant re-encode. Machine-local
+ * on purpose: the key names settings, not edit state - and the baked MP4 is
+ * still in the project's cache either way.
+ */
+export function getLastBake(): LastBake | null {
+  const raw = storageGet(BAKE_LAST_KEY);
+  if (!raw) return null;
+  try {
+    const stored = JSON.parse(raw) as Partial<LastBake>;
+    if (typeof stored.projectPath === "string" && typeof stored.bakeKey === "string") {
+      return { projectPath: stored.projectPath, bakeKey: stored.bakeKey };
+    }
+  } catch {
+    // A corrupt entry is a miss, not an error.
+  }
+  return null;
+}
+
+export function setLastBake(projectPath: string, bakeKey: string): void {
+  storageSet(BAKE_LAST_KEY, JSON.stringify({ projectPath, bakeKey }));
+}
+
+const CAPTION_GRANULARITY_KEY = "ctrlbeat.captions.granularity";
+
+/** How auto captions land: one clip per phrase, or one per word. */
+export type CaptionGranularity = "phrase" | "word";
+
+export function getCaptionGranularity(): CaptionGranularity {
+  return storageGet(CAPTION_GRANULARITY_KEY) === "word" ? "word" : "phrase";
+}
+
+export function setCaptionGranularity(value: CaptionGranularity): void {
+  storageSet(CAPTION_GRANULARITY_KEY, value);
+}

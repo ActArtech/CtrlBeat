@@ -52,6 +52,7 @@ export function BeatsPanel({
   onAnalyze,
   onClearBeats,
   onPlaceImages,
+  onPlaceLyrics,
   onPlaceSymbols,
   onPlaceVisualizer,
   onBeatPreset,
@@ -95,6 +96,8 @@ export function BeatsPanel({
   onAnalyze: () => void;
   onClearBeats: () => void;
   onPlaceImages: () => void;
+  /** Opens the lyrics-on-beats sheet; the dialog collects the rest. */
+  onPlaceLyrics: () => void;
   onPlaceSymbols: () => void;
   onPlaceVisualizer: () => void;
   onBeatPreset: (id: BeatPresetId) => void;
@@ -290,6 +293,11 @@ export function BeatsPanel({
             }
             disabled={!canPlaceSymbols || bakingSymbols}
             onClick={onPlaceSymbols}
+          />
+          <Action
+            label={t("beatsPanel.placeLyrics")}
+            disabled={beatCount === 0}
+            onClick={onPlaceLyrics}
           />
         </div>
       </Group>

@@ -10,7 +10,7 @@ const definition: TransitionDefinition = {
     get label() { return t("transitions.wipe-right.label"); },
     category: "motion",
     get blurb() { return t("transitions.wipe-right.blurb"); },
-    implemented: false,
+    implemented: true,
     defaultDuration: 0.8,
 };
 

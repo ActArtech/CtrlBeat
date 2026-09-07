@@ -13,6 +13,7 @@ import {
   findMedia,
   findTrack,
   precedingClip,
+  type Clip,
   type EditorProject,
   type TimelineData,
 } from "./editor";
@@ -38,6 +39,12 @@ export interface TextOverlay {
   /** Offset from centred, as a fraction of the frame. */
   offsetX: number;
   offsetY: number;
+  /** 0..1 while the title fades or dissolves in; absent is fully opaque. */
+  opacity?: number;
+  /** Horizontal travel as a frame fraction while it wipes or pushes in. */
+  translateX?: number;
+  /** Scale multiplier while it zoom-punches in. */
+  scale?: number;
 }
 
 /** A title flattened for the export dialog's rasteriser. */
@@ -51,15 +58,36 @@ export interface ExportTitle {
   duration: number;
   /** Index into the track stack, zero being bottom-most. */
   track: number;
+  /** The clip's transition into its cut, passed through to the export clip -
+      titles take transitions like any visual once rasterised. */
+  transitionIn?: NonNullable<Clip["transitionIn"]>;
+  /** The clip's fades, which the export lowers to the PNG's opacity ramps. */
+  fadeIn: number;
+  fadeOut: number;
 }
 
-/** A cross-fade in progress: the incoming clip's pre-roll, faded in. */
+/** A transition in progress: the incoming clip's pre-roll, arriving. */
 export interface PreviewGhost {
   clipId: string;
   path: string;
   time: number;
   speed: number;
   opacity: number;
+  /**
+   * Horizontal travel left, as a fraction of the frame: 1 enters from the
+   * right edge, -1 from the left, 0 (absent) already there. Wipes and pushes
+   * slide; a zoom leaves it at 0 and scales instead.
+   */
+  translateX?: number;
+  /** Scale multiplier the arrival starts from, settling to 1. */
+  scale?: number;
+}
+
+/** A push in progress: the outgoing picture being shown off the frame. */
+export interface PreviewMainMotion {
+  /** Travel as a fraction of the frame; negative leaves to the left. */
+  translateX: number;
+  scale?: number;
 }
 
 /** A fade-to-colour transition washing over the playhead. */
@@ -79,16 +107,72 @@ export function textOverlaysAt(
   playhead: number,
 ): TextOverlay[] {
   const depth = depthIn(timeline);
-  return clipsAt(project, playhead)
+  return timeline.clips
     .filter((clip) => clip.kind === "text" && clip.text !== undefined)
     .filter((clip) => findTrack(project, clip.trackId)?.visible !== false)
-    .sort((a, b) => depth(a.trackId) - depth(b.trackId))
-    .map((clip) => ({
-      clipId: clip.id,
-      style: clip.text!,
-      offsetX: clip.offsetX,
-      offsetY: clip.offsetY,
-    }));
+    .flatMap((clip) => {
+      const ends = clip.start + clip.duration;
+      const onScreen = playhead >= clip.start && playhead < ends;
+
+      // An overlap transition opens before the cut, so the incoming title
+      // is already drawing during its window - the text twin of the video
+      // ghost. A title has no source handle to clamp to.
+      const transition =
+        !onScreen && clip.transitionIn && OVERLAP_TRANSITIONS.has(clip.transitionIn.id)
+          ? clip.transitionIn
+          : null;
+      const window = transition && precedingClip(project, clip.id) ? transition.duration : 0;
+      const arriving = !onScreen && window > 0 && playhead >= clip.start - window && playhead < clip.start;
+      if (!onScreen && !arriving) return [];
+
+      let opacity = 1;
+      let translateX = 0;
+      let scale = 1;
+      if (arriving && transition) {
+        const progress = 1 - (clip.start - playhead) / window;
+        if (transition.id === "cross-fade") {
+          opacity *= progress;
+        } else if (transition.id === "wipe-left" || transition.id === "push") {
+          translateX = 1 - progress;
+        } else if (transition.id === "wipe-right") {
+          translateX = progress - 1;
+        } else {
+          opacity *= progress;
+          scale = 1.25 - 0.25 * progress;
+        }
+      }
+
+      // The title's own fades, once it is on screen - the same ramps the
+      // export applies to the rasterised PNG. Before the cut the dissolve
+      // above is the only ramp in play.
+      if (onScreen) {
+        const local = playhead - clip.start;
+        if (clip.fadeIn > 0 && local < clip.fadeIn) {
+          opacity *= Math.max(0, local / clip.fadeIn);
+        }
+        const remaining = ends - playhead;
+        if (clip.fadeOut > 0 && remaining < clip.fadeOut) {
+          opacity *= Math.max(0, remaining / clip.fadeOut);
+        }
+      }
+
+      return [
+        {
+          clip,
+          overlay: {
+            clipId: clip.id,
+            style: clip.text!,
+            offsetX: clip.offsetX,
+            offsetY: clip.offsetY,
+            ...(opacity < 1 ? { opacity: Math.min(1, Math.max(0, opacity)) } : {}),
+            ...(translateX !== 0 ? { translateX } : {}),
+            ...(scale !== 1 ? { scale } : {}),
+          },
+        },
+      ];
+    })
+    .sort((a, b) => depth(a.clip.trackId) - depth(b.clip.trackId))
+    .map((entry) => entry.overlay);
 }
 
 /** The top-most visual clip under the playhead, mapped into its source. */
@@ -117,10 +201,13 @@ export function previewSourceAt(
 }
 
 /**
- * The incoming half of a cross-fade under the playhead, if one is in its
- * dissolve window. The handle clamp mirrors the exporter's
- * `resolve_transitions` exactly: no handle, shorter dissolve.
+ * The incoming half of an overlap transition under the playhead, if one is in
+ * its window. The handle clamp mirrors the exporter's `resolve_transitions`
+ * exactly: no handle, shorter transition. Cross-fades and zooms fade in;
+ * wipes and pushes slide in opaque, from the side the exporter lowers.
  */
+const OVERLAP_TRANSITIONS = new Set(["cross-fade", "wipe-left", "wipe-right", "push", "zoom"]);
+
 export function previewGhostAt(
   project: EditorProject,
   timeline: TimelineData,
@@ -128,7 +215,7 @@ export function previewGhostAt(
 ): PreviewGhost | null {
   for (const clip of timeline.clips) {
     const transition = clip.transitionIn;
-    if (!transition || transition.id !== "cross-fade") continue;
+    if (!transition || !OVERLAP_TRANSITIONS.has(transition.id)) continue;
     if (clip.kind !== "video" && clip.kind !== "image") continue;
     if (!precedingClip(project, clip.id)) continue;
     const handle =
@@ -138,13 +225,90 @@ export function previewGhostAt(
     if (d <= 0 || playhead < cut - d || playhead >= cut) continue;
     const media = findMedia(project, clip.mediaId);
     if (!media) continue;
+
+    // How far through the window: 0 at the start of the pre-roll, 1 at the cut.
+    const progress = 1 - (cut - playhead) / d;
+    // How the picture arrives, per kind - the exporter's per-kind ramp.
+    let translateX = 0;
+    let scale = 1;
+    let opacity = 1;
+    if (transition.id === "cross-fade") {
+      opacity = progress;
+    } else if (transition.id === "wipe-left" || transition.id === "push") {
+      translateX = 1 - progress;
+    } else if (transition.id === "wipe-right") {
+      translateX = progress - 1;
+    } else {
+      opacity = progress;
+      scale = 1.25 - 0.25 * progress;
+    }
+
     return {
       clipId: clip.id,
       path: media.path,
       time: Math.max(0, clip.sourceStart - (cut - playhead) * clip.speed),
       speed: clip.speed,
-      opacity: 1 - (cut - playhead) / d,
+      opacity,
+      ...(translateX !== 0 ? { translateX } : {}),
+      ...(scale !== 1 ? { scale } : {}),
     };
+  }
+  return null;
+}
+
+/**
+ * The displayed clip's picture fade at the playhead, as a 0..1 factor that
+ * multiplies its opacity - the twin of the engine's `video_fade_factor`,
+ * which the export and the paused monitor already apply. One fade fades
+ * sound and picture together; this is the picture half for live playback.
+ */
+export function previewPictureFadeAt(
+  project: EditorProject,
+  timeline: TimelineData,
+  playhead: number,
+): number {
+  const active = clipsAt(project, playhead).filter(
+    (clip) => clip.kind !== "audio" && clip.kind !== "text",
+  );
+  if (active.length === 0) return 1;
+
+  // The same pick the element preview makes: the top-most visual clip.
+  const depth = depthIn(timeline);
+  const displayed = active.reduce((best, clip) =>
+    depth(clip.trackId) > depth(best.trackId) ? clip : best,
+  );
+
+  const local = playhead - displayed.start;
+  let factor = 1;
+  if (displayed.fadeIn > 0 && local < displayed.fadeIn) {
+    factor *= Math.max(0, local / displayed.fadeIn);
+  }
+  const remaining = displayed.duration - local;
+  if (displayed.fadeOut > 0 && remaining < displayed.fadeOut) {
+    factor *= Math.max(0, remaining / displayed.fadeOut);
+  }
+  return Math.min(1, Math.max(0, factor));
+}
+
+/**
+ * The outgoing picture's own motion under the playhead - a push showing it
+ * off the frame - or null when the main element should sit still.
+ */
+export function previewMainMotionAt(
+  project: EditorProject,
+  timeline: TimelineData,
+  playhead: number,
+): PreviewMainMotion | null {
+  for (const clip of timeline.clips) {
+    const transition = clip.transitionIn;
+    if (!transition || transition.id !== "push") continue;
+    if (!precedingClip(project, clip.id)) continue;
+    const cut = clip.start;
+    const d = transition.duration;
+    if (d <= 0 || playhead < cut - d || playhead >= cut) continue;
+
+    // Leaves to the left at the same pace the incoming enters from the right.
+    return { translateX: -(1 - (cut - playhead) / d) };
   }
   return null;
 }
@@ -189,6 +353,9 @@ export function exportTitlesOf(project: EditorProject, timeline: TimelineData): 
         start: clip.start,
         duration: clip.duration,
         track: index,
+        ...(clip.transitionIn ? { transitionIn: clip.transitionIn } : {}),
+        fadeIn: clip.fadeIn,
+        fadeOut: clip.fadeOut,
       },
     ];
   });

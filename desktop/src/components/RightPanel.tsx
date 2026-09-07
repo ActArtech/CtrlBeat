@@ -137,6 +137,7 @@ export const RightPanel = memo(function RightPanel({
     onAnalyze: () => void;
     onClearBeats: () => void;
     onPlaceImages: () => void;
+    onPlaceLyrics: () => void;
     onPlaceSymbols: () => void;
     onPlaceVisualizer: () => void;
     onBeatPreset: (id: BeatPresetId) => void;

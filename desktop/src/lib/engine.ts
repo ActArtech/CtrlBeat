@@ -200,6 +200,37 @@ export async function extractFilmstrip(
   return invoke<ArrayBuffer>("extract_filmstrip", { path, count, height });
 }
 
+// ── the overlay bake ────────────────────────────────────────────────────────
+// One streaming FFmpeg child turns webview-rendered JPEG frames into one MP4
+// in the project cache. begin → N frames → finish returns the file's path;
+// abort kills the child and discards the partial output.
+
+/** Spawns the encoder for `key` (a flat `.mp4` filename) at `fps` frames/s. */
+export async function bakeBegin(project: string, key: string, fps: number): Promise<void> {
+  return invoke<void>("bake_begin", { project, key, fps });
+}
+
+/**
+ * Streams one JPEG frame into the running bake.
+ *
+ * The body ships raw (not a JSON number array like `write_artwork`): a bake
+ * sends thousands of frames, and this is the one inbound path where the
+ * serialised form would cost more than the work.
+ */
+export function bakeFrame(bytes: Uint8Array): Promise<void> {
+  return invoke<void>("bake_frame", bytes);
+}
+
+/** Flushes the encoder and returns the MP4's path, or throws FFmpeg's error. */
+export async function bakeFinish(): Promise<string> {
+  return invoke<string>("bake_finish");
+}
+
+/** Kills the running bake, if any. Safe to call when none is. */
+export async function bakeAbort(): Promise<void> {
+  return invoke<void>("bake_abort");
+}
+
 // ── the editing session ────────────────────────────────────────────────────
 // The engine owns the edit (see engine decision 0007): the UI opens a
 // session, sends commands, and renders the state that comes back.
@@ -488,11 +519,21 @@ export interface TranscriberDownload {
   done: boolean;
 }
 
+/** One timed word inside a segment - whisper's token-level offsets. */
+export interface TranscribedWord {
+  start: number;
+  end: number;
+  text: string;
+}
+
 /** One caption, in seconds relative to the transcribed window's start. */
 export interface TranscribedSegment {
   start: number;
   end: number;
   text: string;
+  /** Present when the transcriber ran with word timing; absent means the
+   * run (or an old binary) only produced segment timing. */
+  words?: TranscribedWord[];
 }
 
 export interface TranscribeRequest {
@@ -504,6 +545,8 @@ export interface TranscribeRequest {
   /** Whisper language code, or "auto". */
   language: string;
   modelId: string;
+  /** Ask for token-level timestamps too. Default false. */
+  wordTimestamps?: boolean;
 }
 
 export async function transcriberStatus(): Promise<TranscriberStatus> {

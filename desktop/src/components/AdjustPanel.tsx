@@ -76,8 +76,11 @@ export function AdjustPanel({
 
   const fadeLimit = Math.max(0.1, Math.min(MAX_FADE, clip.duration / 2));
   const hasPicture = clip.kind === "video" || clip.kind === "image";
-  // A still is picture only: no gain to set, nothing a fade could quieten.
-  const hasSound = clip.kind !== "image";
+  // A still is picture only: no gain to set - but its picture still fades.
+  const hasSound = clip.kind !== "image" && clip.kind !== "text";
+  // One fade fades everything the clip is: sound where it has any, picture
+  // where it has one - and a title's words, once rasterised.
+  const canFade = hasPicture || hasSound || clip.kind === "text";
   const sourceMax = maxSourceStart(media?.duration, clip.duration, clip.speed);
   const showSourceWindow = clip.kind === "video" && sourceMax > 0.05;
 
@@ -202,8 +205,8 @@ export function AdjustPanel({
         </Group>
       )}
 
-      {hasSound && (
-      <Group title={t("adjust.fades")}>
+      {canFade && (
+      <Group title={t("adjust.fades")} help={t("adjust.fadesHelp")}>
         <Slider
           label={t("adjust.fadeIn")}
           value={Math.min(clip.fadeIn, fadeLimit)}

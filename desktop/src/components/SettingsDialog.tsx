@@ -23,12 +23,15 @@ import aboutMark from "../assets/brand/about-128.png";
 import { BRAND } from "../lib/brand";
 import { LOCALES, systemLocale, useLocale, type MsgKey } from "../lib/i18n";
 import {
+  getCaptionGranularity,
   getTranscriberLanguage,
   getTranscriberModel,
   getTtsModel,
+  setCaptionGranularity,
   setTranscriberLanguage,
   setTranscriberModel,
   setTtsModel,
+  type CaptionGranularity,
 } from "../lib/settings";
 import { HelpTip } from "./controls";
 import { Icon } from "./Icon";
@@ -179,12 +182,19 @@ const LANGUAGES: { id: string; labelKey: MsgKey }[] = [
   { id: "en", labelKey: "settings.transcriber.languageEnglish" },
 ];
 
+/** How auto captions land: one clip per phrase, or one per word. */
+const CAPTION_STYLES: { id: CaptionGranularity; labelKey: MsgKey }[] = [
+  { id: "phrase", labelKey: "settings.transcriber.captionsPhrase" },
+  { id: "word", labelKey: "settings.transcriber.captionsWord" },
+];
+
 function TranscriberSettings() {
   const { t } = useLocale();
   const [status, setStatus] = useState<TranscriberStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useState(getTranscriberModel());
   const [language, setLanguage] = useState(getTranscriberLanguage());
+  const [captions, setCaptions] = useState(getCaptionGranularity());
   /** The model being downloaded and how far along it is, or null. */
   const [download, setDownload] = useState<{ id: string; fraction: number } | null>(null);
   const unlisten = useRef<(() => void) | null>(null);
@@ -261,6 +271,11 @@ function TranscriberSettings() {
     setTranscriberLanguage(id);
   };
 
+  const chooseCaptions = (id: CaptionGranularity) => {
+    setCaptions(id);
+    setCaptionGranularity(id);
+  };
+
   return (
     <div className="flex flex-col gap-5">
       {/* Which binary transcribes is plumbing, not a setting: a healthy
@@ -298,6 +313,30 @@ function TranscriberSettings() {
               onClick={() => chooseLanguage(entry.id)}
               className={`flex-1 cursor-pointer rounded-md px-2 py-1 text-[12px] transition-colors ${
                 language === entry.id
+                  ? "bg-panel text-primary shadow-[0_1px_2px_rgba(0,0,0,0.14)]"
+                  : "text-secondary hover:text-primary"
+              }`}
+            >
+              {t(entry.labelKey)}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-tertiary">
+          {t("settings.transcriber.captions")}
+          <HelpTip align="start" text={t("settings.transcriber.captionsHelp")} />
+        </h3>
+        <div className="flex w-56 rounded-lg bg-sunken p-0.5">
+          {CAPTION_STYLES.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              aria-pressed={captions === entry.id}
+              onClick={() => chooseCaptions(entry.id)}
+              className={`flex-1 cursor-pointer rounded-md px-2 py-1 text-[12px] transition-colors ${
+                captions === entry.id
                   ? "bg-panel text-primary shadow-[0_1px_2px_rgba(0,0,0,0.14)]"
                   : "text-secondary hover:text-primary"
               }`}

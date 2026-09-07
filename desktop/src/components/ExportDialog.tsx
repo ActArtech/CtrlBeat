@@ -70,7 +70,14 @@ function overlayClip(title: ExportTitle, path: string): ExportClip {
     // Solid: a title's own transparency is baked into its rasterised PNG.
     opacity: 1,
     videoFilterChain: "",
-    transition: null,
+    // Titles take transitions like any visual once rasterised - the clip's
+    // cut transition passes straight through, and its fades become the
+    // PNG's opacity ramps (one fade fades the words too).
+    transition: title.transitionIn
+      ? { kind: title.transitionIn.id, duration: title.transitionIn.duration }
+      : null,
+    videoFadeIn: title.fadeIn,
+    videoFadeOut: title.fadeOut,
     mediaWidth: null,
     mediaHeight: null,
   };

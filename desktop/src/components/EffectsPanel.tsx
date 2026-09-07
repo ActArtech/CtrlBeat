@@ -38,7 +38,10 @@ export function EffectsPanel({
 }) {
   const { t } = useLocale();
 
-  if (!clip || (clip.kind !== "video" && clip.kind !== "image")) {
+  // Sound has nothing here; picture and titles do - a title's transition is
+  // edited exactly like a clip's (it lowers to the same overlap machinery
+  // once rasterised), it just has no video effects of its own.
+  if (!clip || clip.kind === "audio") {
     return (
       <Empty icon={<Icon name="sparkles" size={26} strokeWidth={1.5} />}>
         {t("effects.panel.empty")}
@@ -118,6 +121,12 @@ export function EffectsPanel({
             />
           </div>
         </section>
+      )}
+
+      {clip.kind === "text" && !transition && (
+        <p className="text-[11px] leading-relaxed text-tertiary">
+          {t("effects.panel.titleTransitions")}
+        </p>
       )}
 
       {applied.length > 0 && (
@@ -208,11 +217,13 @@ export function EffectsPanel({
         </section>
       )}
 
-      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-tertiary">
-        {t("effects.panel.addEffect")}
-      </h3>
-      <ul className="flex flex-col gap-0.5">
-        {EFFECTS.map((effect) => (
+      {clip.kind !== "text" && (
+        <>
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-tertiary">
+            {t("effects.panel.addEffect")}
+          </h3>
+          <ul className="flex flex-col gap-0.5">
+            {EFFECTS.map((effect) => (
           <li key={effect.id}>
             <button
               type="button"
@@ -225,8 +236,10 @@ export function EffectsPanel({
               <span className="min-w-0 flex-1 truncate text-xs text-primary">{effect.label}</span>
             </button>
           </li>
-        ))}
-      </ul>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }

@@ -269,6 +269,7 @@ export function Preview({
   opacity,
   effects,
   ghost,
+  mainMotion = null,
   engineStill,
   veil,
   mediaSize,
@@ -302,9 +303,20 @@ export function Preview({
   opacity: number;
   /** The displayed clip's video effects, drawn live. Null for none. */
   effects: AppliedEffect[] | null;
-  /** A cross-fade in progress: the incoming clip's pre-roll, faded in over
-   * the picture. Null outside a dissolve window. */
-  ghost: { clipId: string; path: string; time: number; speed: number; opacity: number } | null;
+  /** A transition in progress: the incoming clip's pre-roll arriving over
+   * the picture - faded, slid or scaled by kind. Null outside its window. */
+  ghost: {
+    clipId: string;
+    path: string;
+    time: number;
+    speed: number;
+    opacity: number;
+    translateX?: number;
+    scale?: number;
+  } | null;
+  /** The outgoing picture's own motion - a push showing it off the frame.
+   * Null when the main element should sit still. */
+  mainMotion: { translateX: number; scale?: number } | null;
   /** The engine's true composite for the paused playhead - the exporter's own
    * plan and compositor. Drawn over the approximation while it holds. */
   engineStill: { bytes: ArrayBuffer; width: number; height: number } | null;
@@ -431,12 +443,19 @@ export function Preview({
     ? -look.jitter.amount * pixelScale * Math.cos(playhead * look.jitter.speed * 1.3)
     : 0;
 
+  // A transition's own motion on the outgoing picture (a push showing it off
+  // the frame), appended inside the transform list so it travels with any
+  // user transform. Fractions of the frame, like every other offset here.
+  const motionCss = mainMotion
+    ? ` translateX(${mainMotion.translateX * 100}%)${mainMotion.scale !== undefined ? ` scale(${mainMotion.scale})` : ""}`
+    : "";
+
   const mediaCss =
     transform && frameRect
       ? {
           transform: `translate(${transform.offsetX * frameRect.width + jitterX}px, ${
             transform.offsetY * frameRect.height + jitterY
-          }px) rotate(${transform.rotation}deg) scale(${transform.scale})`,
+          }px) rotate(${transform.rotation}deg) scale(${transform.scale})${motionCss}`,
           // The same blend the compositor applies on export. On the wrapper
           // with the transform, so the whole picture fades as one surface.
           opacity: Math.min(1, Math.max(0, opacity)),
@@ -444,7 +463,9 @@ export function Preview({
           // underneath inherits them too.
           filter: look.filter ?? undefined,
         }
-      : undefined;
+      : motionCss
+        ? { transform: motionCss.trim() }
+        : undefined;
 
   // Swap the source only when the clip under the playhead actually changes.
   // Reassigning `src` every frame would restart the decoder continuously.
@@ -1122,7 +1143,15 @@ function GhostVideo({
   ghost,
   playing,
 }: {
-  ghost: { clipId: string; path: string; time: number; speed: number; opacity: number };
+  ghost: {
+    clipId: string;
+    path: string;
+    time: number;
+    speed: number;
+    opacity: number;
+    translateX?: number;
+    scale?: number;
+  };
   playing: boolean;
 }) {
   const element = useRef<HTMLVideoElement>(null);
@@ -1159,7 +1188,15 @@ function GhostVideo({
       muted
       playsInline
       className="pointer-events-none absolute inset-0 h-full w-full object-contain"
-      style={{ opacity: Math.min(1, Math.max(0, ghost.opacity)) }}
+      style={{
+        opacity: Math.min(1, Math.max(0, ghost.opacity)),
+        // Slides arrive from a side (fractions of the frame), zooms scale in;
+        // absent geometry is a plain dissolve.
+        transform:
+          ghost.translateX !== undefined || ghost.scale !== undefined
+            ? `translateX(${(ghost.translateX ?? 0) * 100}%) scale(${ghost.scale ?? 1})`
+            : undefined,
+      }}
     />
   );
 }
@@ -1460,10 +1497,15 @@ function TextOverlayBox({
           // Percentages here would resolve against the text block's own
           // width, which varies with the words. The frame is the thing
           // offsets are relative to, so they are converted against its
-          // measured box instead.
+          // measured box instead. A transition's travel appends inside the
+          // list so it rides with the offsets - fractions of the frame,
+          // like the ghost's geometry.
           transform: `translate(${overlay.offsetX * frameRect.width}px, ${
             overlay.offsetY * frameRect.height
-          }px)`,
+          }px)${overlay.translateX !== undefined ? ` translateX(${overlay.translateX * 100}%)` : ""}${
+            overlay.scale !== undefined ? ` scale(${overlay.scale})` : ""
+          }`,
+          opacity: overlay.opacity,
           maxWidth: "92%",
           touchAction: "none",
         }}

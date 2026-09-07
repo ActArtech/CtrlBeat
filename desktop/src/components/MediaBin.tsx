@@ -83,6 +83,8 @@ export const MediaBin = memo(function MediaBin({
   onAddToTimeline,
   onApplyEffect,
   onApplyTransition,
+  onApplyTransitionToAll,
+  onApplyTransitionToSelected,
   onToggleSlot,
   onUseTemplate,
   onSaveTemplate,
@@ -115,6 +117,10 @@ export const MediaBin = memo(function MediaBin({
   onApplyEffect: (effectId: string) => void;
   /** Puts a transition on the selected clip's cut; the app validates. */
   onApplyTransition: (transitionId: string) => void;
+  /** Puts a transition on every cut of the timeline, as one undo step. */
+  onApplyTransitionToAll: (transitionId: string) => void;
+  /** Puts a transition on every cut within the timeline selection. */
+  onApplyTransitionToSelected: (transitionId: string) => void;
   /** Marks or unmarks a media item as a template slot. */
   onToggleSlot: (mediaId: string, placeholder: boolean) => void;
   /** Takes the user to the fill flow for one template. */
@@ -222,7 +228,12 @@ export const MediaBin = memo(function MediaBin({
             )}
             {tab === "text" && <TextPage onAddText={onAddText} />}
             {tab === "transitions" && (
-              <TransitionsPage category={transitionCategory} onApply={onApplyTransition} />
+              <TransitionsPage
+                category={transitionCategory}
+                onApply={onApplyTransition}
+                onApplyAll={onApplyTransitionToAll}
+                onApplySelected={onApplyTransitionToSelected}
+              />
             )}
             {tab === "effects" && <EffectsPage category={effectCategory} onApply={onApplyEffect} />}
             {tab === "templates" && (
@@ -715,19 +726,34 @@ function CatalogueCard({
   label,
   blurb,
   onApply,
+  onApplyAll,
+  onApplySelected,
   children,
 }: {
   label: string;
   blurb: string;
   /** Absent means not implemented yet - the card browses but does nothing. */
   onApply?: () => void;
+  /** Puts the item on every cut at once, where the item is a transition. */
+  onApplyAll?: () => void;
+  /** Puts the item on every cut inside the timeline selection. */
+  onApplySelected?: () => void;
   children: ReactNode;
 }) {
   const { t } = useLocale();
+  const scopeChips =
+    onApply && (onApplyAll || onApplySelected)
+      ? [
+          ...(onApplySelected ? [{ key: "sel", label: t("mediaBin.applySelectedChip"), hint: t("mediaBin.applySelectedHint"), act: onApplySelected }] : []),
+          ...(onApplyAll ? [{ key: "all", label: t("mediaBin.applyAllChip"), hint: t("mediaBin.applyAllHint"), act: onApplyAll }] : []),
+        ]
+      : [];
   return (
     <li
       title={`${label}\n${blurb}\n${
-        onApply ? t("mediaBin.applyHint") : t("mediaBin.notAvailable")
+        onApply
+          ? [t("mediaBin.applyHint"), ...scopeChips.map((chip) => chip.hint)].join("\n")
+          : t("mediaBin.notAvailable")
       }`}
       onClick={onApply}
       className={`group select-none ${onApply ? "cursor-pointer" : ""}`}
@@ -754,6 +780,27 @@ function CatalogueCard({
             {t("mediaBin.soon")}
           </span>
         )}
+        {scopeChips.length > 0 && (
+          <div className="invisible absolute bottom-1 left-1 flex gap-1 group-hover:visible">
+            {scopeChips.map((chip) => (
+              <button
+                key={chip.key}
+                type="button"
+                title={chip.hint}
+                onClick={(event) => {
+                  // The card's own click applies to the selected clip; these
+                  // chips are the wider sweeps and must not trigger that too.
+                  event.stopPropagation();
+                  chip.act();
+                }}
+                className="rounded bg-black/55 px-1.5 py-px font-technical text-[10px]
+                           text-white hover:bg-black/75"
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <span className="mt-1 block truncate text-[11px] leading-tight text-secondary">{label}</span>
     </li>
@@ -763,9 +810,13 @@ function CatalogueCard({
 function TransitionsPage({
   category,
   onApply,
+  onApplyAll,
+  onApplySelected,
 }: {
   category: TransitionCategory;
   onApply: (transitionId: string) => void;
+  onApplyAll: (transitionId: string) => void;
+  onApplySelected: (transitionId: string) => void;
 }) {
   const visible = TRANSITIONS.filter((transition) => transition.category === category);
   return (
@@ -776,6 +827,8 @@ function TransitionsPage({
           label={transition.label}
           blurb={transition.blurb}
           onApply={transition.implemented ? () => onApply(transition.id) : undefined}
+          onApplyAll={transition.implemented ? () => onApplyAll(transition.id) : undefined}
+          onApplySelected={transition.implemented ? () => onApplySelected(transition.id) : undefined}
         >
           <Icon name="transition" size={22} strokeWidth={1.5} className="text-tertiary" />
         </CatalogueCard>

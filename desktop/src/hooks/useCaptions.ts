@@ -14,8 +14,8 @@ import {
   type EditorProject,
   type MediaItem,
 } from "../lib/editor";
-import { transcribeClip } from "../lib/engine";
-import { getTranscriberLanguage, getTranscriberModel } from "../lib/settings";
+import { transcribeClip, type TranscribedWord } from "../lib/engine";
+import { getCaptionGranularity, getTranscriberLanguage, getTranscriberModel } from "../lib/settings";
 import { defaultTextStyle } from "../lib/text";
 
 export function useCaptions({
@@ -40,11 +40,34 @@ export function useCaptions({
           window: clip.duration * clip.speed,
           language: getTranscriberLanguage(),
           modelId: getTranscriberModel(),
+          // Always ask: the phrase style ignores the words, but asking costs
+          // nothing extra on this run and the choice can change later.
+          wordTimestamps: true,
         });
         if (segments.length === 0) {
           onToast("No speech found", false);
           return;
         }
+
+        // Word-by-word: one clip per timed word, the karaoke style. Empty
+        // when the preference is phrases, or the run came back without
+        // token timing (an old binary) - then phrases catch the fall.
+        const words: TranscribedWord[] =
+          getCaptionGranularity() === "word"
+            ? segments.flatMap((segment) => segment.words ?? [])
+            : [];
+        const captionClips =
+          words.length > 0
+            ? words.map((word) => ({
+                start: clip.start + word.start / clip.speed,
+                duration: Math.max(0.3, (word.end - word.start) / clip.speed),
+                content: word.text,
+              }))
+            : segments.map((segment) => ({
+                start: clip.start + segment.start / clip.speed,
+                duration: Math.max(0.4, (segment.end - segment.start) / clip.speed),
+                content: segment.text,
+              }));
 
         let trackId = activeTimeline(getProject()).tracks.find(
           (track) => track.name === "Captions",
@@ -57,18 +80,21 @@ export function useCaptions({
 
         await dispatch({
           op: "batch",
-          commands: segments.map((segment) => ({
+          commands: captionClips.map((caption) => ({
             op: "addTextClip",
             trackId,
-            start: clip.start + segment.start / clip.speed,
-            duration: Math.max(0.4, (segment.end - segment.start) / clip.speed),
+            start: caption.start,
+            duration: caption.duration,
             offsetY: 0.38,
             // Caption-sized and lower-third, not title-sized and centred.
-            style: { ...defaultTextStyle(), content: segment.text, fontSize: 0.045 },
+            style: { ...defaultTextStyle(), content: caption.content, fontSize: 0.045 },
           })),
         });
+        const count = captionClips.length;
         onToast(
-          `Added ${segments.length} caption${segments.length === 1 ? "" : "s"}`,
+          words.length > 0
+            ? `Added ${count} word captions`
+            : `Added ${count} caption${count === 1 ? "" : "s"}`,
           false,
         );
       } catch (cause) {
