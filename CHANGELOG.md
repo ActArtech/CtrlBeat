@@ -4,7 +4,7 @@ One entry per release, newest first. Plain lists of what changed for the
 person using the app; internal refactors appear only when they change
 behaviour.
 
-## Unreleased
+## v0.4.0 — 2026-09-07
 
 - Transitions and fades work on titles. Text clips were locked out of both:
   the guards rejected them, and the export's rasterised-title path silently

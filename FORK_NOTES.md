@@ -6,7 +6,7 @@ Custom desktop build of [jub0t/Concat](https://github.com/jub0t/Concat).
 This document covers what we added on top of upstream, how to install the build, and what is *not* ready yet (mobile).
 
 **Date:** 2026-09-07  
-**App version in installer:** CtrlBeat 0.3.1 (features below are post-0.3.1 source)  
+**App version in installer:** CtrlBeat 0.4.0  
 **Base:** Concat / WolfCut (Tauri + React + Rust engine)  
 **Bundle id:** `app.ctrlbeat.desktop`
 
@@ -14,12 +14,12 @@ This document covers what we added on top of upstream, how to install the build,
 
 ## Quick start for friends (non-technical)
 
-1. Get `releases/CtrlBeat_0.3.1_x64-setup.exe` (USB, Drive, or zip).
+1. Get `releases/CtrlBeat_0.4.0_x64-setup.exe` (USB, Drive, or zip).
 2. Double-click it.
 3. If Windows SmartScreen appears: **More info** → **Run anyway** (this build is unsigned).
 4. Open **CtrlBeat** from the Start menu.
 
-Also available: `releases/CtrlBeat_0.3.1_x64_en-US.msi` (same app, MSI packaging).
+Also available: `releases/CtrlBeat_0.4.0_x64_en-US.msi` (same app, MSI packaging).
 
 Do **not** hand people the full source tree or ask them to `git clone` unless they have Node, Rust, and Visual Studio Build Tools. Official Concat GitHub releases do **not** include these CtrlBeat features.
 
@@ -115,7 +115,7 @@ Important product rule:
 > Live ASCII / visualizer overlay is **preview-only**.  
 > It is **not** in the MP4 until frames are baked to a timeline track.
 
-**How the bake works now (post-0.3.1):** "Place visualizer / code symbols on
+**How the bake works now:** "Place visualizer / code symbols on
 beats" (and the automatic pre-export bake) opens a **bake sheet** first —
 what will bake, the span, a smoothness choice (12/24/30 fps; ASCII-on-video
 samples the source once per frame so it runs at 12), and a live
@@ -148,7 +148,7 @@ media items / clips / undo entries.
 
 Beat detection, placement, visualizer, and ASCII controls were moved out of a crowded **File** menu into the dedicated **Beats** right-panel tab. File stays for project / import / export style actions.
 
-### 8. September 2026 wave (post-0.3.1 source)
+### 8. September 2026 wave (shipped in 0.4.0)
 
 - **Transitions are all real.** Wipe Left / Right, Push and Zoom existed in
   the catalogue but clicked to nothing; they are now lowered in the engine
@@ -177,8 +177,8 @@ Beat detection, placement, visualizer, and ASCII controls were moved out of a cr
 
 | File | Approx size | Role |
 |------|-------------|------|
-| `releases/CtrlBeat_0.3.1_x64-setup.exe` | ~84 MB | Preferred Windows installer (NSIS) |
-| `releases/CtrlBeat_0.3.1_x64_en-US.msi` | ~114 MB | MSI alternative |
+| `releases/CtrlBeat_0.4.0_x64-setup.exe` | ~84 MB | Preferred Windows installer (NSIS) |
+| `releases/CtrlBeat_0.4.0_x64_en-US.msi` | ~114 MB | MSI alternative |
 | `releases/README.txt` | small | Short install instructions |
 
 Older `WolfCut_0.2.0_*` builds in `releases/` (if present) are pre-rebrand artifacts.

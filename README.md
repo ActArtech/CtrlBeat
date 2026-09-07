@@ -8,7 +8,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11-161616?style=flat&labelColor=000000" alt="Windows" />
-  <img src="https://img.shields.io/badge/Version-0.3.1-E62E31?style=flat&labelColor=000000" alt="Version 0.3.1" />
+  <img src="https://img.shields.io/badge/Version-0.4.0-E62E31?style=flat&labelColor=000000" alt="Version 0.4.0" />
   <img src="https://img.shields.io/badge/License-AGPL--3.0--or--later-161616?style=flat&labelColor=000000" alt="AGPL-3.0-or-later" />
 </p>
 
@@ -59,7 +59,7 @@ It is **not** an official Concat release. See [ATTRIBUTION.md](ATTRIBUTION.md).
 Share / run the NSIS installer (built locally; not always on GitHub Releases):
 
 ```text
-releases/CtrlBeat_0.3.1_x64-setup.exe
+releases/CtrlBeat_0.4.0_x64-setup.exe
 ```
 
 1. Double-click the setup.exe  
