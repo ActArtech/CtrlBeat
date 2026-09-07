@@ -1,14 +1,13 @@
 # Upstream Concat PR drafts
 
-Upstream (`jub0t/Concat`) has moved to the Slint `engine/` app (no Tauri
-`desktop/`). These three branches retarget freeze / duplicate / fit onto that
-stack. Branches are on **https://github.com/ActArtech/Concat**.
+All three PRs are **open** against `jub0t/Concat` (branches on
+**https://github.com/ActArtech/Concat**):
 
-API `gh pr create` against `jub0t/Concat` returned:
-`ActArtech does not have the correct permissions to execute CreatePullRequest`.
-Open the compare links below in the browser (or post the same text in
-[Discussion #3](https://github.com/jub0t/Concat/discussions/3) if they prefer
-ideas before PRs).
+- [#46 Duplicate every selected clip](https://github.com/jub0t/Concat/pull/46) - mergeable
+- [#47 Fit-to-frame and match-size actions](https://github.com/jub0t/Concat/pull/47) - mergeable
+- [#48 Freeze frame at the playhead](https://github.com/jub0t/Concat/pull/48) - rebased onto current `main` 2026-09-07 (import conflict resolved; the freeze still now clones the source clip so new model fields carry over); `cargo test -p concat-project` green (46 tests)
+
+The drafts below are kept as the PR bodies' source of truth.
 
 ---
 
