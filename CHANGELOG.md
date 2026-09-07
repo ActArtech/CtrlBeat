@@ -6,6 +6,13 @@ behaviour.
 
 ## Unreleased
 
+- Platform export presets. The export sheet gains a Platform row: Project
+  (as edited, the previous behaviour and still the default), YouTube
+  1080p/4K, Shorts · Reels · TikTok (1080×1920), Instagram Feed
+  (1080×1350), Square 1:1 and Cinema 21:9. A preset with a different
+  aspect from the project letterboxes - the picture is fitted and centred,
+  never stretched - and titles rasterise at the output size so they land
+  edge to edge whatever the platform.
 - Faster, lighter sessions. Artwork writes (freeze-frame stills, export
   posters, waveform caches) now ship their bytes raw instead of as JSON
   number arrays - what used to cost more serialisation than the write

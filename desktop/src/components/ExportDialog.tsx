@@ -30,6 +30,22 @@ const QUALITIES: {
 ];
 
 /**
+ * Platform output presets. `null` is the project's own frame - the only mode
+ * that existed before presets. Anything else renders at the platform's size;
+ * a different aspect letterboxes, because the compositor fits and centres
+ * every layer rather than stretching it.
+ */
+const PLATFORMS: { labelKey: MsgKey; hint: string; width: number | null; height: number | null }[] = [
+  { labelKey: "export.platform.original", hint: "", width: null, height: null },
+  { labelKey: "export.platform.youtube", hint: "1920×1080", width: 1920, height: 1080 },
+  { labelKey: "export.platform.youtube4k", hint: "3840×2160", width: 3840, height: 2160 },
+  { labelKey: "export.platform.shorts", hint: "1080×1920", width: 1080, height: 1920 },
+  { labelKey: "export.platform.instagram", hint: "1080×1350", width: 1080, height: 1350 },
+  { labelKey: "export.platform.square", hint: "1080×1080", width: 1080, height: 1080 },
+  { labelKey: "export.platform.cinema", hint: "2560×1080", width: 2560, height: 1080 },
+];
+
+/**
  * A title bound for the file. The engine composites pixels, not fonts, so the
  * dialog rasterises each of these into a full-frame transparent PNG at the
  * output size just before the render starts.
@@ -122,6 +138,7 @@ export function ExportDialog({
 }) {
   const [output, setOutput] = useState(`${projectPath}/${projectName}.mp4`);
   const [quality, setQuality] = useState<(typeof QUALITIES)[number]>(QUALITIES[1]);
+  const [platform, setPlatform] = useState<(typeof PLATFORMS)[number]>(PLATFORMS[0]);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const { t, tp } = useLocale();
   const unlisten = useRef<(() => void) | null>(null);
@@ -150,6 +167,12 @@ export function ExportDialog({
     setPhase({ kind: "running", progress: null });
     startedAt.current = null;
 
+    // The frame the file gets - the preset's when one is picked, the
+    // project's otherwise. Titles rasterise at this size too, so their PNGs
+    // land edge to edge whatever the platform.
+    const outWidth = platform.width ?? width;
+    const outHeight = platform.height ?? height;
+
     try {
       // Titles first, before the engine is involved: each becomes a PNG in
       // the project cache and joins the clip list as one more still.
@@ -159,7 +182,13 @@ export function ExportDialog({
           kind: "running",
           progress: { frame: index, total: titles.length, stage: t("export.stageTitles") },
         });
-        const bytes = await rasterizeTitle(title.style, title.offsetX, title.offsetY, width, height);
+        const bytes = await rasterizeTitle(
+          title.style,
+          title.offsetX,
+          title.offsetY,
+          outWidth,
+          outHeight,
+        );
         const key = `title-${index}-${title.clipId.replace(/[^A-Za-z0-9_-]/g, "")}.png`;
         const path = await writeCacheFile(projectPath, key, bytes);
         overlays.push(overlayClip(title, path));
@@ -177,6 +206,7 @@ export function ExportDialog({
         output,
         crf: quality.crf,
         preset: quality.preset,
+        ...(platform.width && platform.height ? { width: platform.width, height: platform.height } : {}),
         titles: overlays,
       });
       setPhase({ kind: "done", path });
@@ -242,7 +272,7 @@ export function ExportDialog({
         <dl className="mb-5 space-y-1 rounded-lg bg-sunken px-3 py-2.5">
           <Row
             label={t("export.format")}
-            value={`${width} x ${height} · ${(rateNum / rateDen).toFixed(2)} fps`}
+            value={`${platform.width ?? width} x ${platform.height ?? height} · ${(rateNum / rateDen).toFixed(2)} fps`}
           />
           <Row label={t("export.duration")} value={shortDuration(duration)} />
           <Row
@@ -276,6 +306,37 @@ export function ExportDialog({
               </button>
             </div>
 
+            <Label>{t("export.platformTitle")}</Label>
+            <div className="mb-5 grid grid-cols-3 gap-1.5">
+              {PLATFORMS.map((option) => (
+                <button
+                  key={option.labelKey}
+                  type="button"
+                  aria-pressed={option.width === platform.width && option.height === platform.height}
+                  onClick={() => setPlatform(option)}
+                  className={`flex cursor-pointer flex-col items-center gap-0.5 rounded-lg px-2 py-2
+                              transition-colors ${
+                                option.width === platform.width && option.height === platform.height
+                                  ? "bg-accent text-on-accent"
+                                  : "bg-hover text-secondary hover:bg-active"
+                              }`}
+                >
+                  <span className="text-xs">{t(option.labelKey)}</span>
+                  <span className="font-technical text-[10px] opacity-60">
+                    {option.hint || t("export.platform.originalHint")}
+                  </span>
+                </button>
+              ))}
+            </div>
+            {platform.width !== null &&
+              platform.height !== null &&
+              Math.abs(width / height - platform.width / platform.height) > 0.01 && (
+                <p className="mt-1.5 text-[10px] leading-snug text-tertiary">
+                  {t("export.platform.fitNote")}
+                </p>
+              )}
+
+            <div className="mt-5" />
             <Label>{t("export.qualityTitle")}</Label>
             <div className="mb-5 grid grid-cols-3 gap-1.5">
               {QUALITIES.map((option) => (

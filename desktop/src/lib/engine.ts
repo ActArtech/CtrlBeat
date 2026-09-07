@@ -392,6 +392,13 @@ export interface ExportRequest {
   crf: number;
   preset: string;
   /**
+   * Output size override for a platform preset. Absent means the project's
+   * own frame. A different aspect letterboxes - the compositor fits and
+   * centres every layer, never stretches.
+   */
+  width?: number;
+  height?: number;
+  /**
    * Rasterised titles, rejoining as image clips. The timeline itself is
    * deliberately absent: the engine flattens its own session (engine
    * decision 0009), so size, rate and clips all come from the model. The

@@ -891,6 +891,13 @@ struct ExportSpec {
     crf: u8,
     /// The x264 speed/size preset name, e.g. "medium".
     preset: String,
+    /// Output size override for a platform preset. Absent means the project's
+    /// own frame. The compositor fits and centres every layer, so a preset
+    /// with a different aspect letterboxes rather than stretches.
+    #[serde(default)]
+    width: Option<u32>,
+    #[serde(default)]
+    height: Option<u32>,
     /// Rasterised text clips - fonts and layout live in the webview, so
     /// titles arrive as images the flattener cannot produce itself.
     #[serde(default)]
@@ -908,8 +915,8 @@ async fn export_project(
     clips.extend(request.titles);
     let request = export::ExportRequest {
         output: request.output,
-        width: settings.width,
-        height: settings.height,
+        width: request.width.unwrap_or(settings.width),
+        height: request.height.unwrap_or(settings.height),
         rate_num: settings.rate_num,
         rate_den: settings.rate_den,
         crf: request.crf,
