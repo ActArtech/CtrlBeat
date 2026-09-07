@@ -4,6 +4,17 @@ One entry per release, newest first. Plain lists of what changed for the
 person using the app; internal refactors appear only when they change
 behaviour.
 
+## Unreleased
+
+- Faster, lighter sessions. Artwork writes (freeze-frame stills, export
+  posters, waveform caches) now ship their bytes raw instead of as JSON
+  number arrays - what used to cost more serialisation than the write
+  itself. The redo history is capped at the same depth as undo, so a long
+  undo/redo churn no longer piles up hundreds of full-project clones; and
+  the artwork cache now closes and evicts old bitmaps (64 strips / 192
+  waveforms) and forgets a media item's artwork when it is deleted from the
+  bin - long import-heavy sessions stop leaking GPU-adjacent memory.
+
 ## v0.4.0 — 2026-09-07
 
 - Transitions and fades work on titles. Text clips were locked out of both:

@@ -79,6 +79,12 @@ impl Editor {
         match self.undo.pop_back() {
             Some(previous) => {
                 self.redo.push(std::mem::replace(&mut self.project, previous));
+                // The same depth cap as undo: a long undo run used to grow
+                // redo without bound, holding hundreds of deep project
+                // clones alive for a stack one keystroke clears anyway.
+                if self.redo.len() > UNDO_DEPTH {
+                    self.redo.remove(0);
+                }
                 true
             }
             None => false,
@@ -117,5 +123,26 @@ impl Editor {
 impl Default for Editor {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redo_is_capped_like_undo() {
+        let mut editor = Editor::new();
+        for _ in 0..(UNDO_DEPTH + 10) {
+            editor.apply(Command::AddTrack).expect("adds a track");
+        }
+        while editor.undo() {}
+        // Undo's own cap means at most UNDO_DEPTH snapshots were ever
+        // recorded, so redo holds exactly that many - never the unbounded
+        // pile it used to grow into.
+        for _ in 0..UNDO_DEPTH {
+            assert!(editor.redo(), "redo still has work while under the cap");
+        }
+        assert!(!editor.redo(), "redo ran dry exactly at the cap");
     }
 }

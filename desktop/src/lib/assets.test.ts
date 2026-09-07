@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 /**
  * The waveform cache's wire format.
  *
@@ -10,11 +9,14 @@
  * remember the old files on disk: decode must keep reading yesterday's bytes,
  * or the cache key (in `loadPeaks`) must change so stale entries miss.
  *
- * jsdom because `assets.ts` reads `window.devicePixelRatio` at module scope.
+ * Node, not jsdom: `assets.ts` guards its one window read at module scope
+ * now, and the jsdom dependency chain in this checkout cannot start a worker
+ * (html-encoding-sniffer requiring ESM) - which used to make this whole file
+ * flake before a single test ran.
  */
 import { describe, expect, test } from "vitest";
 
-import { decodePeaks, encodePeaks, type Peaks } from "./assets";
+import { createAssets, decodePeaks, encodePeaks, forgetAssets, rememberPeaks, rememberStrip, type Peaks } from "./assets";
 
 function peaks(min: number[], max: number[], bucketsPerSecond = 200): Peaks {
   return {
@@ -133,5 +135,57 @@ describe("decodePeaks fails soft on bad files", () => {
       new DataView(bytes.buffer).setFloat32(0, rate, true);
       expect(decodePeaks(bytes.buffer)).toBeNull();
     }
+  });
+});
+
+describe("cache eviction", () => {
+  const fakeBitmap = (): { bitmap: ImageBitmap; raw: { closed: boolean } } => {
+    const raw = { closed: false };
+    const bitmap = {
+      close: () => {
+        raw.closed = true;
+      },
+    } as unknown as ImageBitmap;
+    return { bitmap, raw };
+  };
+
+  test("the strip ceiling evicts the oldest bitmap and closes it", () => {
+    const assets = createAssets();
+    const first = fakeBitmap();
+    rememberStrip(assets, "m1", first.bitmap, 24);
+    // Fill to the ceiling without crossing it.
+    for (let index = 2; index <= 64; index += 1) {
+      rememberStrip(assets, `m${index}`, fakeBitmap().bitmap, 24);
+    }
+    expect(assets.strips.size).toBe(64);
+    expect(first.raw.closed).toBe(false);
+
+    rememberStrip(assets, "m65", fakeBitmap().bitmap, 24);
+    expect(assets.strips.size).toBe(64);
+    expect(first.raw.closed).toBe(true);
+    expect(assets.stripFrames.has("m1")).toBe(false);
+    expect(assets.strips.has("m2")).toBe(true);
+  });
+
+  test("forgetting a media item drops everything it cached", () => {
+    const assets = createAssets();
+    const gone = fakeBitmap();
+    rememberStrip(assets, "gone", gone.bitmap, 1);
+    rememberPeaks(assets, "gone", peaks([0], [1]));
+    forgetAssets(assets, "gone");
+    expect(gone.raw.closed).toBe(true);
+    expect(assets.strips.size).toBe(0);
+    expect(assets.peaks.size).toBe(0);
+    expect(assets.stripFrames.size).toBe(0);
+  });
+
+  test("the peaks ceiling evicts without closing anything", () => {
+    const assets = createAssets();
+    for (let index = 0; index < 193; index += 1) {
+      rememberPeaks(assets, `p${index}`, peaks([index], [index + 1]));
+    }
+    expect(assets.peaks.size).toBe(192);
+    expect(assets.peaks.has("p0")).toBe(false);
+    expect(assets.peaks.has("p192")).toBe(true);
   });
 });

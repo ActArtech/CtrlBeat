@@ -329,8 +329,25 @@ async fn read_artwork(project: String, key: String) -> Result<tauri::ipc::Respon
 
 /// Stores one artwork file in the project's cache. Best-effort: the caller
 /// fires and forgets, and a failed write only means regenerating next launch.
+///
+/// The bytes arrive as the raw request body - the same channel `bake_frame`
+/// opened. Artwork is JPEGs and PNGs, hundreds of kilobytes at a time, and
+/// this used to be the one inbound byte path still shipping them as a JSON
+/// number array, which cost more serialisation than the write itself. The
+/// project and key ride along as headers, percent-encoded by the caller:
+/// header values must be ASCII, and project paths are not guaranteed to be.
 #[tauri::command]
-async fn write_artwork(project: String, key: String, bytes: Vec<u8>) -> Result<(), String> {
+async fn write_artwork(request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let headers = request.headers();
+    let project = header_path(headers, "project")?;
+    let key = header_path(headers, "key")?;
+    let bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => bytes.clone(),
+        tauri::ipc::InvokeBody::Json(_) => {
+            return Err("write_artwork wants raw bytes, not json".to_owned())
+        }
+    };
+
     let file = artwork_file(&project, &key)?;
     tauri::async_runtime::spawn_blocking(move || {
         if let Some(parent) = file.parent() {
@@ -341,6 +358,40 @@ async fn write_artwork(project: String, key: String, bytes: Vec<u8>) -> Result<(
     })
     .await
     .map_err(|error| format!("artwork task failed: {error}"))?
+}
+
+/// One percent-encoded string header, decoded. `encodeURIComponent` output
+/// is pure ASCII, so `to_str` can only fail on a caller that skipped it.
+fn header_path(headers: &tauri::http::HeaderMap, name: &str) -> Result<String, String> {
+    let encoded = headers
+        .get(name)
+        .ok_or_else(|| format!("write_artwork needs the {name} header"))?
+        .to_str()
+        .map_err(|_| format!("the {name} header is not ASCII-encoded text"))?;
+    percent_decode(encoded)
+        .ok_or_else(|| format!("the {name} header is not percent-encoded UTF-8"))
+}
+
+/// Decodes `%XX` escapes; every other byte passes through. The inverse of
+/// JavaScript's `encodeURIComponent`, which leaves only ASCII unreserved
+/// characters bare.
+fn percent_decode(encoded: &str) -> Option<String> {
+    let bytes = encoded.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hex = bytes.get(index + 1..index + 3)?;
+            let high = (hex[0] as char).to_digit(16)?;
+            let low = (hex[1] as char).to_digit(16)?;
+            decoded.push((high * 16 + low) as u8);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
 }
 
 /// Decodes mono f32 PCM for offline beat detection.
@@ -1017,4 +1068,32 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn percent_decoding_round_trips_encodeuricomponent_output() {
+        // The shapes the write path actually carries: plain keys, paths with
+        // spaces and non-ASCII, and the unreserved characters encodeURIComponent
+        // leaves bare.
+        for value in ["peaks-abc.strip.jpg", "C:/Users/cafe/ Desktop", "项目/cache/x"] {
+            let encoded: String = value
+                .bytes()
+                .map(|byte| {
+                    let ch = byte as char;
+                    if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '!' | '~' | '*' | '\'' | '(' | ')') {
+                        ch.to_string()
+                    } else {
+                        format!("%{byte:02X}")
+                    }
+                })
+                .collect();
+            assert_eq!(percent_decode(&encoded).as_deref(), Some(value));
+        }
+        assert_eq!(percent_decode("a%2"), None, "a dangling escape is refused");
+        assert_eq!(percent_decode("a%zz"), None, "bad hex is refused");
+    }
 }

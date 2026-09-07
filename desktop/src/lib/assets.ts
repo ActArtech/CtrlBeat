@@ -72,8 +72,62 @@ const STRIP_FRAMES = 24;
  * display's real pixel density or a Retina screen upscales them into mush.
  * Capped at the engine's 240 limit; the ratio is read once because a strip
  * cached at one density is not worth regenerating on a monitor change.
+ *
+ * Guarded so the module also loads outside a window (the test runner's node
+ * environment) - a constant is all it needs there.
  */
-const STRIP_HEIGHT = Math.min(240, Math.round(72 * (window.devicePixelRatio || 1)));
+const STRIP_HEIGHT = Math.min(
+  240,
+  Math.round(72 * (typeof window === "undefined" ? 1 : window.devicePixelRatio || 1)),
+);
+
+/**
+ * Cache ceilings. Strips are decoded bitmaps - the expensive thing, and the
+ * one that holds GPU-adjacent memory until closed, which nothing was ever
+ * doing; peaks are plain float pairs, so more of them fit. Beyond the
+ * ceiling the oldest-inserted entry is evicted, and evicted bitmaps are
+ * *closed*, not parked on the GC's doorstep.
+ */
+const STRIP_CACHE_MAX = 64;
+const PEAKS_CACHE_MAX = 192;
+
+/** Caches one strip, evicting the oldest bitmap if the ceiling is hit. */
+export function rememberStrip(
+  assets: MediaAssets,
+  mediaId: string,
+  bitmap: ImageBitmap,
+  frames: number,
+): void {
+  assets.strips.set(mediaId, bitmap);
+  assets.stripFrames.set(mediaId, frames);
+  while (assets.strips.size > STRIP_CACHE_MAX) {
+    const oldest = assets.strips.keys().next().value;
+    if (oldest === undefined || oldest === mediaId) break;
+    forgetAssets(assets, oldest);
+  }
+}
+
+/** Caches one waveform, evicting the oldest if the ceiling is hit. */
+export function rememberPeaks(assets: MediaAssets, mediaId: string, peaks: Peaks): void {
+  assets.peaks.set(mediaId, peaks);
+  while (assets.peaks.size > PEAKS_CACHE_MAX) {
+    const oldest = assets.peaks.keys().next().value;
+    if (oldest === undefined || oldest === mediaId) break;
+    assets.peaks.delete(oldest);
+  }
+}
+
+/**
+ * Drops everything cached for one media item - the bin deletion path - and
+ * closes the bitmap so its memory is released now, not at the GC's leisure.
+ */
+export function forgetAssets(assets: MediaAssets, mediaId: string): void {
+  assets.strips.get(mediaId)?.close();
+  assets.strips.delete(mediaId);
+  assets.stripFrames.delete(mediaId);
+  assets.peaks.delete(mediaId);
+  assets.pending.delete(mediaId);
+}
 
 /**
  * Starts producing artwork for one media item if it is not already cached.
@@ -108,7 +162,7 @@ export function requestAssets(
   if (wantsPeaks) {
     jobs.push(
       loadPeaks(media.path, projectPath).then((peaks) => {
-        if (peaks) assets.peaks.set(media.id, peaks);
+        if (peaks) rememberPeaks(assets, media.id, peaks);
       }),
     );
   }
@@ -119,16 +173,10 @@ export function requestAssets(
           // timeline and the bin draw it with the code they already have, and
           // a long still clip tiles the same frame instead of stretching it.
           loadImage(media.path).then((bitmap) => {
-            if (bitmap) {
-              assets.strips.set(media.id, bitmap);
-              assets.stripFrames.set(media.id, 1);
-            }
+            if (bitmap) rememberStrip(assets, media.id, bitmap, 1);
           })
         : loadStrip(media.path, media.duration, projectPath).then((strip) => {
-            if (strip) {
-              assets.strips.set(media.id, strip);
-              assets.stripFrames.set(media.id, STRIP_FRAMES);
-            }
+            if (strip) rememberStrip(assets, media.id, strip, STRIP_FRAMES);
           }),
     );
   }
@@ -161,7 +209,7 @@ export function requestVideoPeaks(
 
   void loadPeaks(media.path, projectPath)
     .then((peaks) => {
-      if (peaks) assets.peaks.set(media.id, peaks);
+      if (peaks) rememberPeaks(assets, media.id, peaks);
     })
     .finally(() => {
       assets.pending.delete(pendingKey);
@@ -280,6 +328,9 @@ async function loadStrip(
       // A corrupt cache entry falls through to regeneration.
     }
   }
+  // Eviction is by insertion order (Map order): good enough for the bin's
+  // working set, and touching recency on every timeline read would put map
+  // writes inside the draw loop.
 
   try {
     const bytes = await extractFilmstrip(path, STRIP_FRAMES, STRIP_HEIGHT);

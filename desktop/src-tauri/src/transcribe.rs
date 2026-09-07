@@ -600,10 +600,11 @@ fn run_transcription(
         match run_killable(build(request.word_timestamps), slot, "whisper-cli") {
             Ok(()) => {}
             // A binary from before the full-JSON flag still transcribes; one
-            // plain rerun keeps captions working, minus word timing.
-            Err(error) if request.word_timestamps => {
+            // plain rerun keeps captions working, minus word timing. The
+            // first error is discarded on purpose: the rerun's outcome is
+            // the one that matters.
+            Err(_) if request.word_timestamps => {
                 run_killable(build(false), slot, "whisper-cli")?;
-                let _ = error;
             }
             Err(error) => return Err(error),
         }

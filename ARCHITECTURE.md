@@ -130,9 +130,10 @@ flowchart TB
   monitor. The export is "only ever a higher-quality version of what you
   already saw."
 - All 15 byte-shipping commands use `tauri::ipc::Response` (ArrayBuffer),
-  so no base64 or number-array serialisation on the hot paths. The one
-  exception: `write_artwork(bytes: Vec<u8>)` serialises inbound as a JSON
-  number array.
+  so no base64 or number-array serialisation on the hot paths. Inbound bytes
+  ride the raw request body too (`bake_frame` frames, `write_artwork`
+  artwork), with scalar arguments as percent-encoded headers - no JSON
+  number arrays anywhere in either direction.
 
 ---
 
@@ -197,15 +198,14 @@ others. Meanwhile `editor_api.rs` converts poison to a `String` error at
 in one codebase. Pick one (probably: poison = clear the poisoned state and
 carry on, since every cache here is rebuildable).
 
-### 6.3 Unbounded growth
+### 6.3 Unbounded growth (both fixed, kept as the record)
 
-- `redo: Vec<Project>` in the engine editor has **no cap** (undo is capped at
-  200) — each entry is a deep clone of the whole project
-  (`wolfcut-project/src/editor.rs:28`).
-- `desktop/src/lib/assets.ts` — the `peaks`/`strips`/`stripFrames` maps grow
-  per media id with no eviction, and no `ImageBitmap.close()` is ever called;
-  GPU-backed bitmaps wait for GC. A long session with many imports leaks
-  VRAM-adjacent memory.
+- ~~`redo: Vec<Project>` in the engine editor has **no cap**~~ — capped at the
+  same 200 as undo since v0.4.x (`editor.rs`, `redo_is_capped_like_undo`).
+- ~~`desktop/src/lib/assets.ts` maps grow per media id with no eviction~~ —
+  strips and peaks now sit under ceilings (64 bitmaps / 192 waveforms) with
+  insertion-order eviction, evicted bitmaps are `close()`d, and bin deletion
+  drops that media's cache entirely (`forgetAssets`).
 
 ### 6.4 Swallowed errors
 

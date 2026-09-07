@@ -33,7 +33,7 @@ import { StartScreen, type ProjectSession } from "./components/StartScreen";
 import { TitleBar } from "./components/TitleBar";
 import { Toast } from "./components/Toast";
 import { TimelinePanel, resolveDrop, type Tool } from "./components/TimelinePanel";
-import { createAssets, requestAssets, requestVideoPeaks } from "./lib/assets";
+import { createAssets, forgetAssets, requestAssets, requestVideoPeaks } from "./lib/assets";
 import {
   activeTimeline,
   clipsAt,
@@ -1329,6 +1329,9 @@ function Editor({
     void dispatch(
       commands.length === 1 ? commands[0] : { op: "batch", commands: [...commands] },
     );
+    // The engine forgets its side; the artwork cache forgets its bitmaps -
+    // closed, so a long session of imports and deletes stops leaking.
+    for (const mediaId of ids) forgetAssets(assets.current, mediaId);
     setSelectedMediaIds([]);
   }, [dispatch]);
 

@@ -181,14 +181,22 @@ export async function readArtwork(project: string, key: string): Promise<ArrayBu
   return invoke<ArrayBuffer>("read_artwork", { project, key });
 }
 
-/** Stores one artwork file in the project's cache. Fire-and-forget shaped:
- * a failed write only means regenerating next launch. */
+/**
+ * Stores one artwork file in the project's cache. Fire-and-forget shaped:
+ * a failed write only means regenerating next launch.
+ *
+ * The bytes ship as the raw request body - the same channel `bakeFrame`
+ * uses - with the project and key as percent-encoded headers: header values
+ * must be ASCII, and project paths are not guaranteed to be.
+ */
 export async function writeArtwork(
   project: string,
   key: string,
   bytes: Uint8Array,
 ): Promise<void> {
-  return invoke<void>("write_artwork", { project, key, bytes: Array.from(bytes) });
+  return invoke<void>("write_artwork", bytes, {
+    headers: { project: encodeURIComponent(project), key: encodeURIComponent(key) },
+  });
 }
 
 /** A strip of evenly spaced frames as one JPEG, for timeline filmstrips. */
@@ -453,7 +461,7 @@ export async function writeCacheFile(
   key: string,
   bytes: Uint8Array,
 ): Promise<string> {
-  await invoke<void>("write_artwork", { project, key, bytes: Array.from(bytes) });
+  await writeArtwork(project, key, bytes);
   return `${project}/cache/${key}`;
 }
 
