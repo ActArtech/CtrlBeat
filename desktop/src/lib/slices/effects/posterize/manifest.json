@@ -1,7 +1,0 @@
-{
-  "id": "posterize",
-  "kind": "effect",
-  "category": "stylize",
-  "i18nKey": "effects.posterize",
-  "swatch": "linear-gradient(135deg, #e64980 0%, #e64980 33%, #7950f2 33%, #7950f2 66%, #1098ad 66%, #1098ad 100%)"
-}

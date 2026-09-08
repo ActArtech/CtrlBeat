@@ -1,7 +1,0 @@
-{
-  "id": "mirror",
-  "kind": "effect",
-  "category": "distort",
-  "i18nKey": "effects.mirror",
-  "swatch": "linear-gradient(90deg, #63e6be 0%, #0ca678 50%, #63e6be 100%)"
-}

@@ -1,7 +1,0 @@
-{
-  "id": "vibrance",
-  "kind": "effect",
-  "category": "color",
-  "i18nKey": "effects.vibrance",
-  "swatch": "linear-gradient(135deg, #ff6b6b 0%, #fcc419 40%, #51cf66 70%, #339af0 100%)"
-}

@@ -1,7 +1,0 @@
-{
-  "id": "sepia",
-  "kind": "effect",
-  "category": "basic",
-  "i18nKey": "effects.sepia",
-  "swatch": "linear-gradient(135deg, #e9d3ae 0%, #a9773f 60%, #513a1c 100%)"
-}

@@ -1,8 +1,0 @@
-{
-  "id": "zoom",
-  "kind": "transition",
-  "category": "motion",
-  "i18nKey": "transitions.zoom",
-  "implemented": true,
-  "defaultDuration": 0.8
-}

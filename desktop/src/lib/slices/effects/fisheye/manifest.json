@@ -1,7 +1,0 @@
-{
-  "id": "fisheye",
-  "kind": "effect",
-  "category": "distort",
-  "i18nKey": "effects.fisheye",
-  "swatch": "radial-gradient(circle at 50% 50%, #d0bfff 0%, #9775fa 55%, #5f3dc4 100%)"
-}

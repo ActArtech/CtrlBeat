@@ -1,8 +1,0 @@
-{
-  "id": "wipe-left",
-  "kind": "transition",
-  "category": "motion",
-  "i18nKey": "transitions.wipe-left",
-  "implemented": true,
-  "defaultDuration": 0.8
-}

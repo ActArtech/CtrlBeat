@@ -1,7 +1,0 @@
-{
-  "id": "invert",
-  "kind": "effect",
-  "category": "basic",
-  "i18nKey": "effects.invert",
-  "swatch": "linear-gradient(135deg, #00d0ff 0%, #7a00c8 55%, #ffe600 100%)"
-}

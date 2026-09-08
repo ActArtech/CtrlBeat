@@ -1,7 +1,0 @@
-{
-  "id": "shake",
-  "kind": "effect",
-  "category": "distort",
-  "i18nKey": "effects.shake",
-  "swatch": "linear-gradient(105deg, #ffc9c9 0%, #ff8787 40%, #fa5252 60%, #ffc9c9 100%)"
-}

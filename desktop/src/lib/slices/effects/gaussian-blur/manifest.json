@@ -1,7 +1,0 @@
-{
-  "id": "gaussian-blur",
-  "kind": "effect",
-  "category": "blur",
-  "i18nKey": "effects.gaussian-blur",
-  "swatch": "linear-gradient(135deg, #b3c7f9 0%, #7f9cf5 55%, #4c6ef5 100%)"
-}

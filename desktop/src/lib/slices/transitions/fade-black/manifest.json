@@ -1,8 +1,0 @@
-{
-  "id": "fade-black",
-  "kind": "transition",
-  "category": "basic",
-  "i18nKey": "transitions.fade-black",
-  "implemented": true,
-  "defaultDuration": 1
-}

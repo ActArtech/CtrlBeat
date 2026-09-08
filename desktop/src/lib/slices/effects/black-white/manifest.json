@@ -1,7 +1,0 @@
-{
-  "id": "black-white",
-  "kind": "effect",
-  "category": "basic",
-  "i18nKey": "effects.black-white",
-  "swatch": "linear-gradient(135deg, #e8e8e8 0%, #6b6b6b 55%, #1c1c1c 100%)"
-}

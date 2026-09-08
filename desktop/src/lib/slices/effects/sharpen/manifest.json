@@ -1,7 +1,0 @@
-{
-  "id": "sharpen",
-  "kind": "effect",
-  "category": "basic",
-  "i18nKey": "effects.sharpen",
-  "swatch": "linear-gradient(135deg, #cfd8dc 0%, #607d8b 55%, #263238 100%)"
-}
