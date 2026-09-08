@@ -45,7 +45,6 @@
     "resources": {
       "ffmpeg/*": "ffmpeg/",
       "whisper/*": "whisper/"
-    },
-    "mainBinaryName": "CtrlBeat"
+    }
   }
 }
