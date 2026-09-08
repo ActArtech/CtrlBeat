@@ -11,6 +11,15 @@ edition = "2021"
 name = "wolfcut_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# The binary is named after the product, not the crate: the installed exe,
+# the Start-menu shortcut and the taskbar all take this name, and an explicit
+# `[[bin]]` disables cargo's package-name autodiscovery so there is exactly
+# one binary. `mainBinaryName` in tauri.conf.json proved not to reach the
+# NSIS bundler (tauri 2.11) - the cargo name is what shipped.
+[[bin]]
+name = "ctrlbeat"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
