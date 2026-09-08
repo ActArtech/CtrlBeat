@@ -1,0 +1,8 @@
+{
+  "id": "fade-white",
+  "kind": "transition",
+  "category": "basic",
+  "i18nKey": "transitions.fade-white",
+  "implemented": true,
+  "defaultDuration": 1
+}

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CtrlBeat — Download</title>
+<meta name="description" content="Beat-synced video editing. Free, local, no watermark. Windows installer download." />
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: #0b0d10; color: #e8eaed;
+    font: 16px/1.6 system-ui, "Segoe UI", sans-serif;
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+    padding: 4rem 1.5rem; text-align: center;
+  }
+  img { width: 96px; height: 96px; border-radius: 22%; }
+  h1 { font-size: 2.2rem; margin: 1rem 0 0.25rem; letter-spacing: -0.02em; }
+  .tagline { color: #9aa3ad; font-size: 1.1rem; }
+  .badges { margin: 1.25rem 0 2rem; display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; }
+  .badges span {
+    background: #16191d; border: 1px solid #262b31; border-radius: 999px;
+    padding: 0.25rem 0.9rem; font-size: 0.8rem; color: #9aa3ad;
+  }
+  .badges .accent { color: #e62e31; border-color: #4a2022; }
+  .download {
+    display: inline-block; background: #e62e31; color: #fff; text-decoration: none;
+    font-size: 1.15rem; font-weight: 600; padding: 1rem 2.6rem; border-radius: 12px;
+    transition: background 0.15s;
+  }
+  .download:hover { background: #ff4245; }
+  .filehint { color: #9aa3ad; font-size: 0.85rem; margin-top: 0.75rem; }
+  ol {
+    text-align: left; max-width: 26rem; margin: 2.5rem auto 0;
+    color: #c4cbd3; padding-left: 1.25rem;
+  }
+  ol li { margin: 0.5rem 0; }
+  ol b { color: #e8eaed; }
+  .note { color: #8a929b; font-size: 0.85rem; max-width: 30rem; margin: 1.5rem auto 0; }
+  footer { margin-top: 3rem; color: #6b737b; font-size: 0.85rem; }
+  footer a { color: #9aa3ad; }
+</style>
+</head>
+<body>
+  <img src="https://raw.githubusercontent.com/ActArtech/CtrlBeat/main/brandkit/app/icon-128.png" alt="CtrlBeat" />
+  <h1>CtrlBeat</h1>
+  <p class="tagline">Beat-synced video editing. Local. No watermark. No account.</p>
+  <div class="badges">
+    <span class="accent">v0.4.0</span>
+    <span>Windows 10/11</span>
+    <span>Free · AGPL-3.0</span>
+  </div>
+
+  <a class="download" href="https://github.com/ActArtech/CtrlBeat/releases/latest/download/CtrlBeat_0.4.0_x64-setup.exe">Download for Windows</a>
+  <p class="filehint">CtrlBeat_0.4.0_x64-setup.exe · ~84 MB · MSI also available on the <a href="https://github.com/ActArtech/CtrlBeat/releases" style="color:#9aa3ad">releases page</a></p>
+
+  <ol>
+    <li><b>Download</b> the installer above.</li>
+    <li>If SmartScreen warns: <b>More info → Run anyway</b> (the build isn't code-signed yet).</li>
+    <li>Open <b>CtrlBeat</b> from the Start menu. Projects live in <b>Desktop/CtrlBeat</b>.</li>
+  </ol>
+
+  <p class="note">Everything runs on your machine — media, transcription, rendering. Nothing is uploaded anywhere.</p>
+
+  <footer>
+    Built on <a href="https://github.com/jub0t/Concat">Concat / WolfCut</a> ·
+    <a href="https://github.com/ActArtech/CtrlBeat">Source on GitHub</a>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "id": "motion-blur",
+  "kind": "effect",
+  "category": "blur",
+  "i18nKey": "effects.motion-blur",
+  "swatch": "linear-gradient(90deg, #91a7ff 0%, #5c7cfa 45%, #91a7ff 100%)"
+}

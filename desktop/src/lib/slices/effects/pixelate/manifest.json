@@ -1,0 +1,7 @@
+{
+  "id": "pixelate",
+  "kind": "effect",
+  "category": "distort",
+  "i18nKey": "effects.pixelate",
+  "swatch": "repeating-linear-gradient(0deg, #74c0fc 0 6px, #4dabf7 6px 12px), repeating-linear-gradient(90deg, #74c0fc80 0 6px, #4dabf780 6px 12px)"
+}

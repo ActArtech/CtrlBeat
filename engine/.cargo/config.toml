@@ -1,0 +1,21 @@
+# Where the FFmpeg development build lives - machine configuration, not
+# repository configuration.
+#
+# Only the optional `ffi` feature of wolfcut-media needs FFmpeg headers and
+# libraries at build time. A normal build - which talks to FFmpeg as a
+# subprocess - needs nothing here. Do not commit machine paths into this
+# file: rusty_ffmpeg panics on an FFMPEG_INCLUDE_DIR that does not exist,
+# which breaks `--features ffi` for everyone else.
+#
+# To build the ffi feature, set the variables in your own environment (or a
+# cargo config outside the repository):
+#
+#   macOS / Linux, package-manager FFmpeg with dev files:
+#     export FFMPEG_PKG_CONFIG_PATH="$(brew --prefix ffmpeg)/lib/pkgconfig"
+#
+#   Windows, a -shared dev build (gyan.dev / BtbN) unpacked into vendor/:
+#     FFMPEG_INCLUDE_DIR = <build>/include
+#     FFMPEG_LIBS_DIR    = <build>/lib
+#     (Deliberately not FFMPEG_DLL_PATH: rusty_ffmpeg turns that into the
+#     linker's /LIBPATH, which hunts for import libraries in bin/ where only
+#     the DLLs live. The DLLs still have to be findable at run time.)

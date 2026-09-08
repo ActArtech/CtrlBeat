@@ -1,0 +1,1 @@
+macOS .icns not generated on Windows. Use icon-512.png with iconutil/Tauri icon pipeline on macOS.

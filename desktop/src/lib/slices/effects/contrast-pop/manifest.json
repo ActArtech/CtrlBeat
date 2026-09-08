@@ -1,0 +1,7 @@
+{
+  "id": "contrast-pop",
+  "kind": "effect",
+  "category": "color",
+  "i18nKey": "effects.contrast-pop",
+  "swatch": "linear-gradient(135deg, #f8f9fa 0%, #868e96 45%, #212529 100%)"
+}
