@@ -216,13 +216,23 @@ drains silently. Host side: `export.rs:38` drops progress-event send
 failures; `playback.rs:251` drops audio-error emission failures. A grep for
 `catch(() =>` is a good periodic audit.
 
-### 6.5 Trust boundaries
+### 6.5 Trust boundaries (audited 2026-09-07)
 
-- `Preview.tsx:869` feeds `preview_frame` bytes straight into
-  `new ImageData(bytes, w, h)` — a short buffer throws inside the draw loop
-  rather than failing gracefully.
+- ~~`Preview.tsx` feeds `preview_frame` bytes straight into `new ImageData`~~ —
+  the component now length-checks before constructing (Preview.tsx, the
+  `byteLength !== w * h * 4` guard).
 - Counterexample done right: `peaks_bytes` validates cached bytes with
   `plausible_peaks` before trusting them (`lib.rs:233`).
+- Audit posture: `npm audit` clean; `cargo audit` reports **zero
+  vulnerabilities** in the engine and host (warnings are unmaintained
+  notices in Tauri's transitive Linux/GTK deps — tracked upstream). IPC
+  capabilities are minimal (window controls, dialog, opener); CSP pins
+  scripts to `'self'`; `withGlobalTauri` stays off; inbound byte paths use
+  the raw request channel with validated headers. Remaining surface worth
+  revisiting if the threat model ever grows: the media-path commands
+  (`probe_media`, `read_media_bytes`, `extract_still`) trust the webview's
+  path choice by design — acceptable while the webview only loads our own
+  CSP-pinned frontend.
 
 ### 6.6 Default builds don't test the real paths
 
