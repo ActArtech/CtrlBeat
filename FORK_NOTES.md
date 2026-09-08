@@ -14,12 +14,16 @@ This document covers what we added on top of upstream, how to install the build,
 
 ## Quick start for friends (non-technical)
 
-1. Get `releases/CtrlBeat_0.4.0_x64-setup.exe` (USB, Drive, or zip).
-2. Double-click it.
-3. If Windows SmartScreen appears: **More info** → **Run anyway** (this build is unsigned).
-4. Open **CtrlBeat** from the Start menu.
+Send them one link: **https://actartech.github.io/CtrlBeat/** (download page with a big button).
 
-Also available: `releases/CtrlBeat_0.4.0_x64_en-US.msi` (same app, MSI packaging).
+Or straight to the installer: **https://github.com/ActArtech/CtrlBeat/releases/latest**
+(`CtrlBeat_0.4.0_x64-setup.exe`; same app as MSI).
+
+1. Double-click the setup.exe.
+2. If Windows SmartScreen appears: **More info** → **Run anyway** (this build is unsigned).
+3. Open **CtrlBeat** from the Start menu.
+
+A local copy also sits in `releases/` (USB / Drive / zip) when the recipient has no GitHub access. Each release: bump versions, `npx tauri build`, copy both bundles into `releases/`, then `gh release create vX.Y.Z releases/CtrlBeat_*` (notes template in the v0.4.0 release).
 
 Do **not** hand people the full source tree or ask them to `git clone` unless they have Node, Rust, and Visual Studio Build Tools. Official Concat GitHub releases do **not** include these CtrlBeat features.
 

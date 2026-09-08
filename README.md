@@ -54,19 +54,18 @@ It is **not** an official Concat release. See [ATTRIBUTION.md](ATTRIBUTION.md).
 - On-device captions and TTS hooks
 - Local FFmpeg export, no cloud required for core editing
 
-## Install (Windows)
+## Install (Windows) — no code needed
 
-Share / run the NSIS installer (built locally; not always on GitHub Releases):
+**[Download page →](https://actartech.github.io/CtrlBeat/)** — or grab the installer directly from
+[GitHub Releases](https://github.com/ActArtech/CtrlBeat/releases/latest).
 
-```text
-releases/CtrlBeat_0.4.0_x64-setup.exe
-```
+1. Download **CtrlBeat_0.4.0_x64-setup.exe** (also available as an MSI)
+2. If SmartScreen appears: **More info** → **Run anyway** (unsigned build)
+3. Open **CtrlBeat** from the Start menu
 
-1. Double-click the setup.exe  
-2. If SmartScreen appears: **More info** → **Run anyway** (unsigned build)  
-3. Open **CtrlBeat** from the Start menu  
+Projects default to `Desktop/CtrlBeat`. Everything runs locally — no account, no cloud.
 
-Projects default to `Desktop/CtrlBeat`.
+A local copy of the installer also lives in `releases/` for sharing without GitHub.
 
 ## Docs in this repo
 
