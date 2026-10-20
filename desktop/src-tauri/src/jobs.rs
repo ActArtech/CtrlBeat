@@ -60,6 +60,7 @@ impl Job {
 
     /// An owned handle on the same flag, for callbacks that outlive borrows
     /// of the job (an FFI progress callback must be `'static`).
+    #[cfg_attr(not(feature = "tts"), allow(dead_code))]
     pub fn cancel_handle(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.cancel)
     }

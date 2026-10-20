@@ -36,8 +36,10 @@ pub struct TtsStatus {
     voices: Vec<VoiceInfo>,
 }
 
+#[allow(dead_code)]
 pub struct TtsDownloadState(pub Arc<SingleFlight>);
 
+#[allow(dead_code)]
 pub struct TtsState {
     gate: Arc<SingleFlight>,
 }
@@ -91,6 +93,7 @@ pub fn delete_tts_model(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct SpeakRequest {
     pub model_id: String,
     pub voice: i32,

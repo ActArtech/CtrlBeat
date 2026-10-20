@@ -580,7 +580,7 @@ fn run_transcription(
         // The whisper invocation, parameterised only on the JSON flavour:
         // full (`-ojf`, segments + per-token offsets) when word timing was
         // asked for, plain segments otherwise. Same file either way.
-        let mut build = |full: bool| {
+        let build = |full: bool| {
             let mut command = wolfcut_media::command(&binary);
             command
                 .arg("-m")
